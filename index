@@ -78,9 +78,7 @@
       const [selectedIds, setSelectedIds] = useState(new Set());
       
       const [editableInfo, setEditableInfo] = useState({
-        "得意先名１": "", "得意先名２": "", "得意先住所１": "", "得意先住所２": "",
-        "直送先名１": "", "直送先名２": "", "納入期日": "明治33年1月0日", "納入期日_付記": "着",
-        "締日": "0", "支払日": "当月末", "支払方法": ""
+        "得意先名１": "", "得意先住所１": "", "直送先名１": "", "納入期日": "", "締日": "", "支払日": "当月末", "支払方法": ""
       });
 
       const paymentDateOptions = ["当月末", "翌月10日", "翌月20日", "翌月末", "翌々月10日"];
@@ -98,15 +96,15 @@
             .withFailureHandler(() => { setError({ message: "データの取得に失敗しました" }); setLoading(false); })
             .getData(orderNo);
         } else {
+          // デモデータ
           setTimeout(() => {
-            const mockItems = Array.from({ length: 30 }, (_, i) => ({
-              tempId: i, "商品名": `水位センサ DS-1_50m計L=${(i+1)*5}m`, "数量": 1, "単価": 140000
+            const mockItems = Array.from({ length: 35 }, (_, i) => ({
+              "商品名": i % 5 === 0 ? "0円の品名テスト" : `品名 ${i+1}`, 
+              "数量": i % 5 === 0 ? 0 : 1, 
+              "単価": i % 5 === 0 ? 0 : 10000
             }));
             initData({ 
-              orderInfo: { 
-                "受注No": "232922", "得意先名１": "サンプル商事株式会社", "得意先住所１": "東京都港区芝公園4-2-8", "納期": "20240909", 
-                "直送先名": "現場:富山県", "請求締日": "31", "回収種別１": "従来通り", "回収種別２": "振込" 
-              }, 
+              orderInfo: { "受注No": "232922", "得意先名１": "サンプル商事", "得意先住所１": "東京都...", "納期": "20241010" }, 
               items: mockItems 
             });
             setLoading(false);
@@ -117,18 +115,24 @@
       const initData = (data) => {
         const info = data.orderInfo;
         setOrderData(info);
-        setItems(data.items.map((item, idx) => ({ ...item, tempId: idx })));
-        setSelectedIds(new Set(data.items.map((it, idx) => idx)));
         
-        setEditableInfo(prev => ({
-          ...prev, 
+        // 数量・単価が0のものを除外
+        const filteredItems = data.items
+          .filter(it => (Number(it["数量"]) || 0) > 0 && (Number(it["単価"]) || 0) > 0)
+          .map((item, idx) => ({ ...item, tempId: idx }));
+
+        setItems(filteredItems);
+        setSelectedIds(new Set(filteredItems.map(it => it.tempId)));
+        
+        setEditableInfo({
           "得意先名１": info["得意先名１"] || "", 
           "得意先住所１": info["得意先住所１"] || "",
           "直送先名１": info["直送先名"] || "", 
-          "納入期日": info["納期"] || "明治33年1月0日", 
-          "締日": info["請求締日"] || "0",
+          "納入期日": info["納期"] || "", 
+          "締日": info["請求締日"] || "",
+          "支払日": "当月末",
           "支払方法": (info["回収種別１"] || "") + (info["回収種別２"] || "")
-        }));
+        });
       };
 
       const toggleItem = (id) => {
@@ -138,22 +142,19 @@
         setSelectedIds(newSet);
       };
 
-      const validSelectedItems = useMemo(() => items.filter(it => {
-        const isSelected = selectedIds.has(it.tempId);
-        return isSelected && Number(it["数量"]) !== 0 && Number(it["単価"]) !== 0;
-      }), [items, selectedIds]);
+      const validSelectedItems = useMemo(() => items.filter(it => selectedIds.has(it.tempId)), [items, selectedIds]);
       
       const pagedItems = useMemo(() => {
         const pages = [];
         let current = 0;
-        while (current < validSelectedItems.length || pages.length === 0) {
+        if (items.length === 0) return [[]];
+        while (current < items.length) {
           const limit = (pages.length === 0) ? ITEMS_P1 : ITEMS_PN;
-          pages.push(validSelectedItems.slice(current, current + limit));
+          pages.push(items.slice(current, current + limit));
           current += limit;
-          if (current >= validSelectedItems.length && pages.length > 0) break;
         }
         return pages;
-      }, [validSelectedItems]);
+      }, [items]);
 
       const totals = useMemo(() => {
         const subtotal = validSelectedItems.reduce((s, it) => s + (Number(it["数量"]) * Number(it["単価"])), 0);
@@ -161,6 +162,7 @@
       }, [validSelectedItems]);
 
       const handleGenerate = () => {
+        if (validSelectedItems.length === 0) return;
         setGenerating(true);
         if (typeof google !== 'undefined') {
           google.script.run.withSuccessHandler(res => {
@@ -169,176 +171,130 @@
             setGenerating(false);
           }).generatePDF({...orderData, ...editableInfo}, validSelectedItems, totals);
         } else {
-          setTimeout(() => { setError({ message: "デモモードです" }); setGenerating(false); }, 1500);
+          setTimeout(() => { setSuccessUrl("#"); setGenerating(false); }, 1500);
         }
       };
 
-      if (loading) return <div className="flex h-screen items-center justify-center font-bold text-slate-500 bg-slate-50">データを読込中...</div>;
+      if (loading) return <div className="flex h-screen items-center justify-center font-bold text-slate-500">データを読込中...</div>;
 
       return (
         <div className="min-h-screen">
-          {generating && <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center text-white font-bold backdrop-blur-sm">PDFを生成中...</div>}
+          {generating && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center text-white font-bold backdrop-blur-sm flex-col">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent mb-4"></div>
+              PDFを生成中... (30秒ほどかかる場合があります)
+            </div>
+          )}
           
           <header className="bg-slate-900 text-white p-4 sticky top-0 z-40 shadow-lg no-print flex justify-between items-center">
             <div className="max-w-6xl mx-auto w-full flex justify-between items-center px-4">
               <div className="flex items-center space-x-2">
                 <Icon name="FileText" className="text-blue-400" />
-                <h1 className="font-bold text-sm sm:text-base whitespace-nowrap">注文書作成プレビュー ({pagedItems.length} ページ)</h1>
+                <h1 className="font-bold text-sm sm:text-base">注文書プレビュー ({validSelectedItems.length} 明細)</h1>
               </div>
-              <button onClick={handleGenerate} className="bg-blue-600 px-8 py-2.5 rounded-xl font-bold hover:bg-blue-500 transition-all shadow-lg active:scale-95 text-sm">PDFを生成する</button>
+              <button 
+                onClick={handleGenerate} 
+                disabled={validSelectedItems.length === 0}
+                className={`px-8 py-2.5 rounded-xl font-bold transition-all shadow-lg active:scale-95 text-sm ${validSelectedItems.length > 0 ? 'bg-blue-600 hover:bg-blue-500' : 'bg-slate-600 cursor-not-allowed'}`}
+              >
+                PDFを生成する
+              </button>
             </div>
           </header>
 
           <main className="paper-stack">
             {successUrl && (
               <div className="max-w-4xl w-full bg-emerald-50 p-6 border border-emerald-200 rounded-2xl flex justify-between items-center no-print shadow-sm mb-6 mx-auto">
-                <span className="text-emerald-800 font-bold flex items-center text-sm sm:text-base"><Icon name="CheckCircle2" className="mr-2" /> PDFが作成されました。ドライブを確認してください。</span>
+                <span className="text-emerald-800 font-bold flex items-center text-sm sm:text-base"><Icon name="CheckCircle2" className="mr-2" /> PDFが正常に作成されました。</span>
                 <a href={successUrl} target="_blank" className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-emerald-700 shadow-md text-sm">PDFを開く</a>
               </div>
             )}
 
             {pagedItems.map((pageItems, pageIdx) => {
               const isFirst = pageIdx === 0;
-              const isLast = pageIdx === pagedItems.length - 1;
+              const hasMore = pagedItems.length > 1 && pageIdx < pagedItems.length - 1;
+
               return (
                 <div key={pageIdx} className="paper">
                   <div className="absolute top-6 right-12 text-[10px] font-bold text-slate-400">{pageIdx + 1} / {pagedItems.length} ページ</div>
 
                   <div className="text-center mb-4 pt-2">
-                    <h1 className="text-4xl font-bold tracking-[1.5em] border-b-4 border-double border-slate-900 pb-1 inline-block whitespace-nowrap">注 文 書</h1>
+                    <h1 className="text-4xl font-bold tracking-[1.5em] border-b-4 border-double border-slate-900 pb-1 inline-block">注 文 書</h1>
                   </div>
 
-                  {isFirst ? (
-                    <>
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="w-1/2 pt-10"><h2 className="text-xl font-bold border-b-2 border-slate-900 pb-1 inline-block pr-16 whitespace-nowrap">株式会社 オサシ・テクノス 御中</h2></div>
-                        <div className="w-1/2 text-right text-xs space-y-1">
-                          <div className="flex flex-col items-end">
-                            <div className="mb-2 font-bold">{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                            <div className="flex items-center space-x-2">
-                              <span className="text-slate-400 text-[10px]">住所</span>
-                              <input className="inline-input w-[250px] text-right font-bold" value={editableInfo["得意先住所１"]} onChange={e => setEditableInfo({...editableInfo, "得意先住所１": e.target.value})} />
-                            </div>
-                            <div className="flex items-center justify-end mt-1">
-                              <span className="text-slate-400 text-[10px] mr-2">社名</span>
-                              <input className="inline-input w-[250px] text-right font-bold text-lg" value={editableInfo["得意先名１"]} onChange={e => setEditableInfo({...editableInfo, "得意先名１": e.target.value})} />
-                              <span className="ml-2 font-bold">印</span>
-                            </div>
+                  {isFirst && (
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="w-1/2 pt-10"><h2 className="text-xl font-bold border-b-2 border-slate-900 pb-1 inline-block pr-16">株式会社 オサシ・テクノス 御中</h2></div>
+                      <div className="w-1/2 text-right text-xs space-y-1">
+                        <div className="flex flex-col items-end">
+                          <div className="mb-2 font-bold">{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-slate-400 text-[10px]">住所</span>
+                            <input className="inline-input w-[250px] text-right font-bold" value={editableInfo["得意先住所１"]} onChange={e => setEditableInfo({...editableInfo, "得意先住所１": e.target.value})} />
+                          </div>
+                          <div className="flex items-center justify-end mt-1">
+                            <span className="text-slate-400 text-[10px] mr-2">社名</span>
+                            <input className="inline-input w-[250px] text-right font-bold text-lg" value={editableInfo["得意先名１"]} onChange={e => setEditableInfo({...editableInfo, "得意先名１": e.target.value})} />
+                            <span className="ml-2 font-bold">印</span>
                           </div>
                         </div>
                       </div>
-
-                      <div className="grid grid-cols-12 border border-slate-900 mb-6">
-                        <div className="col-span-8 flex flex-col divide-y divide-slate-900 border-r border-slate-900">
-                          <div className="flex h-9">
-                            <div className="w-28 cell-label">■ 納入期日 ■</div>
-                            <div className="flex-1 cell-val flex items-center justify-center">
-                              <input className="bg-transparent text-center w-full outline-none" value={editableInfo["納入期日"]} onChange={e => setEditableInfo({...editableInfo, "納入期日": e.target.value})} />
-                            </div>
-                            <div className="w-12 cell-label border-l border-slate-900">着</div>
-                          </div>
-                          <div className="flex h-9">
-                            <div className="w-28 cell-label">■ 納入場所 ■</div>
-                            <div className="flex-1 cell-val flex items-center">
-                              <input className="bg-transparent w-full outline-none" value={editableInfo["直送先名１"]} onChange={e => setEditableInfo({...editableInfo, "直送先名１": e.target.value})} />
-                            </div>
-                          </div>
-                          <div className="flex flex-col divide-y divide-slate-900">
-                            <div className="flex h-9 text-[10px]">
-                              <div className="w-28 cell-label">■ 支払条件 ■ 締日</div>
-                              <div className="flex-1 cell-val flex items-center justify-center font-bold">
-                                <input className="bg-transparent text-center w-full outline-none" value={editableInfo["締日"]} onChange={e => setEditableInfo({...editableInfo, "締日": e.target.value})} />
-                              </div>
-                            </div>
-                            <div className="flex h-9 text-[10px]">
-                              <div className="w-28 cell-label">支払日</div>
-                              <div className="flex-1 cell-val flex items-center">
-                                <select className="bg-transparent w-full outline-none cursor-pointer" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})}>
-                                  {paymentDateOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                            <div className="flex h-9 text-[10px]">
-                              <div className="w-28 cell-label">支払方法</div>
-                              <div className="flex-1 cell-val flex items-center font-bold">
-                                <input className="bg-transparent w-full outline-none" value={editableInfo["支払方法"]} onChange={e => setEditableInfo({...editableInfo, "支払方法": e.target.value})} />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="col-span-4 flex flex-col divide-y divide-slate-900">
-                          <div className="flex-1 flex items-center justify-between px-3 border-b border-slate-900">
-                            <span className="font-bold text-slate-400 text-[10px]">税抜合計</span>
-                            <span className="font-bold text-xs">¥{totals.subtotal.toLocaleString()}</span>
-                          </div>
-                          <div className="flex-1 flex items-center justify-between px-3 border-b border-slate-900">
-                            <span className="font-bold text-slate-400 text-[10px]">消費税</span>
-                            <span className="font-bold text-xs">¥{totals.tax.toLocaleString()}</span>
-                          </div>
-                          <div className="flex-[2] bg-slate-50 items-stretch flex flex-col justify-center">
-                            <div className="flex justify-between px-3 w-full">
-                              <span className="text-blue-700 font-bold text-[10px]">税込合計</span>
-                              <span className="text-xl font-black text-blue-800 italic leading-none">¥{totals.totalWithTax.toLocaleString()}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="h-10 border-b border-slate-300 mb-6 flex items-end">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Order No: {orderNo} (Cont.)</span>
                     </div>
                   )}
 
-                  <div className="mb-1 text-[10px] font-bold flex items-baseline space-x-2"><span>No.</span><span className="border-b border-slate-300 px-4 min-w-[120px] font-mono">{orderNo}</span></div>
+                  {isFirst && (
+                    <div className="grid grid-cols-12 border border-slate-900 mb-6">
+                      <div className="col-span-8 flex flex-col divide-y divide-slate-900 border-r border-slate-900">
+                        <div className="flex h-9"><div className="w-28 cell-label">■ 納入期日 ■</div><div className="flex-1 cell-val text-center"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["納入期日"]} onChange={e => setEditableInfo({...editableInfo, "納入期日": e.target.value})} /></div><div className="w-12 cell-label border-l border-slate-900">着</div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">■ 納入場所 ■</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["直送先名１"]} onChange={e => setEditableInfo({...editableInfo, "直送先名１": e.target.value})} /></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">■ 支払条件 ■ 締日</div><div className="flex-1 cell-val text-center font-bold"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["締日"]} onChange={e => setEditableInfo({...editableInfo, "締日": e.target.value})} /></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">支払日</div><div className="flex-1 cell-val"><select className="bg-transparent w-full outline-none" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})}>{paymentDateOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">支払方法</div><div className="flex-1 cell-val font-bold"><input className="bg-transparent w-full outline-none" value={editableInfo["支払方法"]} onChange={e => setEditableInfo({...editableInfo, "支払方法": e.target.value})} /></div></div>
+                      </div>
+                      <div className="col-span-4 flex flex-col divide-y divide-slate-900">
+                        <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">税抜合計</span><span className="text-xs font-bold">¥{totals.subtotal.toLocaleString()}</span></div>
+                        <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">消費税</span><span className="text-xs font-bold">¥{totals.tax.toLocaleString()}</span></div>
+                        <div className="flex-[2] bg-slate-50 flex flex-col justify-center px-3"><div className="flex justify-between items-baseline"><span className="text-[10px] text-blue-700 font-bold">税込合計</span><span className="text-xl font-black text-blue-800 italic">¥{totals.totalWithTax.toLocaleString()}</span></div></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!isFirst && <div className="h-10 border-b border-slate-300 mb-6 flex items-end"><span className="text-[10px] font-bold text-slate-400">No. {orderNo} (Cont.)</span></div>}
+
                   <table className="w-full border-collapse border border-slate-900 text-sm">
                     <thead>
                       <tr className="bg-slate-50 h-9">
-                        <th className="border border-slate-900 p-2 w-10 no-print"></th>
-                        <th className="border border-slate-900 p-2 text-center font-bold text-xs whitespace-nowrap">品 名 ・ 型 式</th>
-                        <th className="border border-slate-900 p-2 w-16 text-center font-bold text-xs">数 量</th>
-                        <th className="border border-slate-900 p-2 w-24 text-center font-bold text-xs">単価 (円)</th>
-                        <th className="border border-slate-900 p-2 w-28 text-center font-bold text-xs">金額 (円)</th>
+                        <th className="border border-slate-900 w-10 no-print text-center"><input type="checkbox" checked={pageItems.every(it => selectedIds.has(it.tempId))} onChange={(e) => { const n = new Set(selectedIds); pageItems.forEach(it => e.target.checked ? n.add(it.tempId) : n.delete(it.tempId)); setSelectedIds(n); }} /></th>
+                        <th className="border border-slate-900 p-2 text-center text-xs">品 名 ・ 型 式</th>
+                        <th className="border border-slate-900 w-16 text-center text-xs">数 量</th>
+                        <th className="border border-slate-900 w-24 text-center text-xs">単価 (円)</th>
+                        <th className="border border-slate-900 w-28 text-center text-xs">金額 (円)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {pageItems.map((item) => {
-                        const isSelected = selectedIds.has(item.tempId);
+                        const s = selectedIds.has(item.tempId);
                         return (
-                          <tr key={item.tempId} className={`h-9 transition-all ${isSelected ? '' : 'bg-slate-100 opacity-20 grayscale no-print'}`}>
-                            <td className="border border-slate-900 p-1 text-center no-print">
-                              <button 
-                                onClick={() => toggleItem(item.tempId)}
-                                className={`w-5 h-5 mx-auto rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-transparent hover:border-blue-400'}`}
-                              >
-                                <Icon name="Check" className="w-3.5 h-3.5" strokeWidth={4} />
-                              </button>
-                            </td>
-                            <td className="border border-slate-900 p-2 text-xs leading-tight" onClick={() => toggleItem(item.tempId)}>{item["商品名"]}</td>
-                            <td className="border border-slate-900 p-2 text-center text-xs">{item["数量"]}</td>
-                            <td className="border border-slate-900 p-2 text-right text-xs">¥{Number(item["単価"]).toLocaleString()}</td>
-                            <td className="border border-slate-900 p-2 text-right font-bold text-xs">¥{(Number(item["数量"]) * Number(item["単価"])).toLocaleString()}</td>
+                          <tr key={item.tempId} className={`h-9 ${s ? '' : 'bg-slate-50 opacity-30 no-print'}`}>
+                            <td className="border border-slate-900 text-center no-print"><input type="checkbox" checked={s} onChange={() => toggleItem(item.tempId)} /></td>
+                            <td className="border border-slate-900 p-2 text-xs">{item["商品名"]}</td>
+                            <td className="border border-slate-900 text-center text-xs">{item["数量"]}</td>
+                            <td className="border border-slate-900 text-right p-2 text-xs">¥{Number(item["単価"]).toLocaleString()}</td>
+                            <td className="border border-slate-900 text-right p-2 text-xs font-bold">¥{(Number(item["数量"]) * Number(item["単価"])).toLocaleString()}</td>
                           </tr>
                         );
                       })}
                       {[...Array(Math.max(0, (isFirst ? ITEMS_P1 : ITEMS_PN) - pageItems.length))].map((_, i) => (
-                        <tr key={`empty-${pageIdx}-${i}`} className="h-9"><td className="border border-slate-900 p-2" colSpan="5"></td></tr>
+                        <tr key={i} className="h-9"><td colSpan="5" className="border border-slate-900"></td></tr>
                       ))}
                     </tbody>
-                    {isLast ? (
-                      <tfoot>
-                        <tr className="h-10 bg-slate-50 font-bold border-t-2 border-slate-900">
-                          <td colSpan="4" className="border border-slate-900 p-2 text-center text-xs bg-slate-100 font-black">税込合計金額</td>
-                          <td className="border border-slate-900 p-2 text-right text-lg text-blue-800 italic pr-4">¥{totals.totalWithTax.toLocaleString()}</td>
-                        </tr>
-                      </tfoot>
-                    ) : (
-                      <tfoot>
-                         <tr className="h-10">
-                           <td colSpan="5" className="border-t border-slate-900 px-4 text-right text-[10px] font-bold text-slate-400 italic">次頁に続く</td>
-                         </tr>
-                      </tfoot>
-                    )}
+                    <tfoot>
+                      {pageIdx === pagedItems.length - 1 ? (
+                        <tr className="h-10 bg-slate-50 font-bold border-t-2 border-slate-900"><td colSpan="4" className="border border-slate-900 text-center text-xs bg-slate-100">税込合計金額</td><td className="border border-slate-900 text-right p-2 text-lg text-blue-800 italic">¥{totals.totalWithTax.toLocaleString()}</td></tr>
+                      ) : (
+                        <tr className="h-8"><td colSpan="5" className="px-4 text-right text-[10px] font-bold text-slate-400 italic">次頁に続く</td></tr>
+                      )}
+                    </tfoot>
                   </table>
                 </div>
               );
