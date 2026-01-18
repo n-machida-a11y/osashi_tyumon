@@ -1,6 +1,6 @@
 /**
  * 顧客捺印用注文書生成システム - Backend (GAS)
- * 高速化・2枚目クリーンアップ・合計金額反映強化版
+ * 高速化・PDF生成不具合解消・2枚目クリーンアップ強化版
  */
 
 const CONFIG = {
@@ -43,8 +43,15 @@ function getData(orderNo) {
     const detailData = detailSheet.getDataRange().getValues();
     const detailHeaders = detailData[0];
     const dOrderIndex = detailHeaders.indexOf("受注No");
+    
+    // 0のデータはあらかじめ除外
     const items = detailData.slice(1)
-      .filter(row => String(row[dOrderIndex]) === String(orderNo))
+      .filter(row => {
+        if (String(row[dOrderIndex]) !== String(orderNo)) return false;
+        const q = Number(row[detailHeaders.indexOf("数量")]) || 0;
+        const p = Number(row[detailHeaders.indexOf("単価")]) || 0;
+        return q > 0 && p > 0;
+      })
       .map(row => {
         const item = {};
         detailHeaders.forEach((h, i) => { item[h] = row[i]; });
@@ -61,118 +68,120 @@ function generatePDF(orderData, selectedItems, totals) {
   try {
     const templateFile = DriveApp.getFileById(CONFIG.TEMPLATE_SS_ID);
     const folder = DriveApp.getFolderById(CONFIG.FOLDER_ID);
-    const fileName = `注文書_${orderData["得意先名１"]}_${orderData["受注No"]}`;
-    const newSSFile = templateFile.makeCopy("TEMP_GEN_" + Utilities.getUuid(), folder);
-    const newSS = SpreadsheetApp.openById(newSSFile.getId());
     
-    // マスターシート（クリーンな状態）を保持
+    // ファイル名定義
+    const todayStr = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");
+    const fileName = `${orderNoClean(orderData["受注No"])}_${orderData["得意先名１"]}_${todayStr}_${totals.totalWithTax}円`;
+    
+    // 一時スプレッドシートを作成
+    const newSSFile = templateFile.makeCopy("TEMP_" + Utilities.getUuid(), folder);
+    const newSS = SpreadsheetApp.openById(newSSFile.getId());
     const masterSheet = newSS.getSheets()[0];
     
-    // 1. データのページ分割
+    // データのページ分割
     const pages = [];
-    let currentItemIndex = 0;
-    while (currentItemIndex < selectedItems.length || (pages.length === 0)) {
+    let currentIdx = 0;
+    while (currentIdx < selectedItems.length || (pages.length === 0)) {
       const limit = (pages.length === 0) ? CONFIG.ITEMS_PER_PAGE_P1 : CONFIG.ITEMS_PER_PAGE_PN;
-      pages.push(selectedItems.slice(currentItemIndex, currentItemIndex + limit));
-      currentItemIndex += limit;
-      if (currentItemIndex >= selectedItems.length && pages.length > 0) break;
+      pages.push(selectedItems.slice(currentIdx, currentIdx + limit));
+      currentIdx += limit;
+      if (currentIdx >= selectedItems.length && pages.length > 0) break;
     }
 
     const totalPages = pages.length;
 
-    // 2. 各ページへの書き込み
+    // 各ページ処理
     pages.forEach((pageItems, index) => {
-      const isFirstPage = (index === 0);
-      const isLastPage = (index === totalPages - 1);
-      
-      // 常に何も書いていないマスターからコピーして重複を防ぐ
-      const sheet = isFirstPage ? masterSheet : masterSheet.copyTo(newSS);
+      const isFirst = (index === 0);
+      const isLast = (index === totalPages - 1);
+      const sheet = isFirst ? masterSheet : masterSheet.copyTo(newSS);
       sheet.setName(`P${index + 1}`);
 
+      // 置換データの準備 (2枚目以降は基本情報を空にする)
       const replacements = {
-        "％受注日％": Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日"),
-        "％見積番号％": orderData["受注No"] || "",
-        "％得意先住所１％": orderData["得意先住所１"] || "",
-        "％得意先住所２％": orderData["得意先住所２"] || "",
-        "％得意先名１％": orderData["得意先名１"] || "",
-        "％得意先名２％": orderData["得意先名２"] || "",
-        "％直送先名１％": orderData["直送先名１"] || "",
-        "％直送先名２％": orderData["直送先名２"] || "",
-        "%納期%": orderData["納入期日"] || "",
-        "%締日%": orderData["締日"] || "",
-        "%支払日%": orderData["支払日"] || "",
-        "%支払方法%": orderData["支払方法"] || ""
+        "％受注日％": isFirst ? Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日") : "",
+        "％見積番号％": isFirst ? (orderData["受注No"] || "") : "",
+        "％得意先住所１％": isFirst ? (orderData["得意先住所１"] || "") : "",
+        "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "",
+        "％直送先名１％": isFirst ? (orderData["直送先名１"] || "") : "",
+        "%納期%": isFirst ? (orderData["納入期日"] || "") : "",
+        "%締日%": isFirst ? (orderData["締日"] || "") : "",
+        "%支払日%": isFirst ? (orderData["支払日"] || "") : "",
+        "%支払方法%": isFirst ? (orderData["支払方法"] || "") : ""
       };
 
-      // テキスト一括置換
-      Object.keys(replacements).forEach(key => {
-        sheet.createTextFinder(key).replaceAllWith(replacements[key]);
+      // 一括置換
+      Object.keys(replacements).forEach(k => {
+        sheet.createTextFinder(k).replaceAllWith(replacements[k]);
       });
 
-      // ページ番号
       sheet.getRange(1, 6).setValue(`${index + 1} / ${totalPages} ページ`);
 
-      // 2枚目以降のクリーンアップ（不要行の削除とキーワード消去）
-      if (!isFirstPage) {
-        sheet.deleteRows(2, 12); // ヘッダーエリア削除
-        // 削除後に残る不要なラベルをクリア
-        const deleteLabels = ["支払日", "支払方法", "消費税", "税込合計", "税抜合計", "■ 支払条件 ■", "小計"];
-        deleteLabels.forEach(label => {
-          sheet.createTextFinder(label).replaceAllWith("");
+      // 2枚目以降のクリーンアップ強化（ここを修正）
+      if (!isFirst) {
+        // 1. ヘッダー行（1行目から13行目付近）を削除して詰める
+        sheet.deleteRows(2, 12);
+
+        // 2. 残存エリアの強制クリア
+        // "％商品名％" (明細行) を探し、そのヘッダーより上の行に残っているゴミ（支払条件など）を全て消去
+        const itemPlaceholder = sheet.createTextFinder("％商品名％").findNext();
+        if (itemPlaceholder) {
+          const itemRow = itemPlaceholder.getRow();
+          // 明細行の1つ上がテーブルヘッダーと仮定し、それより上のエリア（2行目〜ヘッダー直前）をクリア
+          if (itemRow > 3) {
+            // タイトル行(1行目)は残し、2行目からテーブルヘッダーの1つ上までをクリア
+            sheet.getRange(2, 1, itemRow - 3, sheet.getLastColumn()).clearContent();
+          }
+        }
+        
+        // 3. 残存する不要な文字を徹底消去（念のため全体検索でも消す）
+        const clearLabels = ["支払", "締日", "当月", "翌月", "従来通り", "振込", "小計", "税抜合計", "消費税", "税込合計", "納入", "場所", "条件", "期日", "着"];
+        clearLabels.forEach(lbl => {
+          sheet.createTextFinder(lbl).replaceAllWith("");
         });
       }
 
-      // 金額・合計欄の制御
-      if (isLastPage) {
-        // プレースホルダがあれば数値置換
-        setNumericValueSmart(sheet, "％税抜合計％", "税抜合計", totals.subtotal);
-        setNumericValueSmart(sheet, "％消費税％", "消費税", totals.tax);
-        setNumericValueSmart(sheet, "％税込合計％", "税込合計", totals.totalWithTax);
+      // 合計金額の処理
+      if (isLast) {
+        setNumeric(sheet, "％税抜合計％", "税抜合計", totals.subtotal);
+        setNumeric(sheet, "％消費税％", "消費税", totals.tax);
+        setNumeric(sheet, "％税込合計％", "税込合計", totals.totalWithTax);
         
-        // 明細テーブル下の小計
-        const subtotalFinder = sheet.createTextFinder("小計").findNext();
-        if (subtotalFinder) {
-           const rowRange = sheet.getRange(subtotalFinder.getRow(), 1, 1, sheet.getLastColumn());
-           const zero = rowRange.createTextFinder("0").findNext();
+        const subFinder = sheet.createTextFinder("小計").findNext();
+        if (subFinder) {
+           const row = subFinder.getRow();
+           const zero = sheet.getRange(row, 1, 1, sheet.getLastColumn()).createTextFinder("0").findNext();
            if (zero) zero.setValue(totals.subtotal);
         }
       } else {
-        // 中間ページ：合計欄を消す
+        // 最終ページ以外
         sheet.createTextFinder("％税抜合計％").replaceAllWith("");
         sheet.createTextFinder("％消費税％").replaceAllWith("");
         sheet.createTextFinder("％税込合計％").replaceAllWith("次頁に続く");
-        const subtotalFinder = sheet.createTextFinder("小計").findNext();
-        if (subtotalFinder) {
-           const rowRange = sheet.getRange(subtotalFinder.getRow(), 1, 1, sheet.getLastColumn());
-           const zero = rowRange.createTextFinder("0").findNext();
-           if (zero) zero.setValue(""); // 1枚目の小計は不要とのご要望
-        }
+        const subFinder = sheet.createTextFinder("小計").findNext();
+        if (subFinder) subFinder.setValue("");
       }
 
-      // 明細データの書き込み
-      const placeholders = { name: "％商品名％", qty: "％数量％", price: "％単価％", amount: "％金額％" };
-      let nameRanges = sheet.createTextFinder(placeholders.name).findAll();
-
-      nameRanges.forEach((range, idx) => {
+      // 明細書き込み
+      const names = sheet.createTextFinder("％商品名％").findAll();
+      names.forEach((range, i) => {
         const rowRange = sheet.getRange(range.getRow(), 1, 1, sheet.getLastColumn());
-        if (idx < pageItems.length) {
-          const item = pageItems[idx];
-          const q = Number(item["数量"]) || 0;
-          const p = Number(item["単価"]) || 0;
+        if (i < pageItems.length) {
+          const item = pageItems[i];
           range.setValue(item["商品名"] || "");
-          replaceWithNumber(rowRange, placeholders.qty, q);
-          replaceWithNumber(rowRange, placeholders.price, p);
-          replaceWithNumber(rowRange, placeholders.amount, q * p);
+          replaceVal(rowRange, "％数量％", Number(item["数量"]) || 0);
+          replaceVal(rowRange, "％単価％", Number(item["単価"]) || 0);
+          replaceVal(rowRange, "％金額％", (Number(item["数量"]) * Number(item["単価"])) || 0);
         } else {
           range.setValue("");
-          [placeholders.qty, placeholders.price, placeholders.amount].forEach(p => {
+          ["％数量％", "％単価％", "％金額％"].forEach(p => {
              rowRange.createTextFinder(p).replaceAllWith("");
           });
         }
       });
     });
 
-    // 最後にフラッシュしてPDF化
+    // 変更を確定しPDFを生成
     SpreadsheetApp.flush();
     const pdfBlob = newSSFile.getAs('application/pdf');
     const pdfFile = folder.createFile(pdfBlob);
@@ -184,47 +193,53 @@ function generatePDF(orderData, selectedItems, totals) {
     const data = mainSheet.getDataRange().getValues();
     const headers = data[0];
     const orderIndex = headers.indexOf("受注No");
-    let pdfColIndex = headers.indexOf(CONFIG.PDF_COL_NAME);
-    if (pdfColIndex === -1) {
-      pdfColIndex = headers.length;
-      mainSheet.getRange(1, pdfColIndex + 1).setValue(CONFIG.PDF_COL_NAME);
+    let pdfIdx = headers.indexOf(CONFIG.PDF_COL_NAME);
+    if (pdfIdx === -1) {
+      pdfIdx = headers.length;
+      mainSheet.getRange(1, pdfIdx + 1).setValue(CONFIG.PDF_COL_NAME);
     }
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][orderIndex]) === String(orderData["受注No"])) {
-        mainSheet.getRange(i + 1, pdfColIndex + 1).setValue(pdfFile.getUrl());
+        mainSheet.getRange(i + 1, pdfIdx + 1).setValue(pdfFile.getUrl());
         break;
       }
     }
 
+    // 重要：一時スプレッドシートは削除
     newSSFile.setTrashed(true);
+    
     return { success: true, pdfUrl: pdfFile.getUrl() };
   } catch (e) {
     return { success: false, message: e.toString() };
   }
 }
 
-/**
- * 補助関数: 指定した範囲のプレースホルダを数値として書き換える
- */
-function replaceWithNumber(range, placeholder, value) {
-  const target = range.createTextFinder(placeholder).findNext();
-  if (target) target.setValue(value);
+function orderNoClean(no) { return String(no).replace(/[^0-9A-Z-]/gi, ''); }
+
+function replaceVal(range, p, v) {
+  const t = range.createTextFinder(p).findNext();
+  if (t) { t.setValue(v); t.setNumberFormat("#,##0"); }
 }
 
-/**
- * 補助関数: プレースホルダが見つからない場合、ラベルの隣のセルを数値で埋めるスマート補完
- */
-function setNumericValueSmart(sheet, placeholder, label, value) {
-  const target = sheet.createTextFinder(placeholder).findNext();
-  if (target) {
-    target.setValue(value);
+function setNumeric(sheet, p, l, v) {
+  const t = sheet.createTextFinder(p).findNext();
+  if (t) {
+    t.setValue(v);
+    t.setNumberFormat("#,##0");
   } else {
-    // プレースホルダがない場合、ラベル（例：「税抜合計」）を探してその隣などの「0」を置換
-    const labelRange = sheet.createTextFinder(label).findNext();
-    if (labelRange) {
-      const rowRange = sheet.getRange(labelRange.getRow(), 1, 1, sheet.getLastColumn());
-      const zero = rowRange.createTextFinder("0").findNext();
-      if (zero) zero.setValue(value);
+    const lbl = sheet.createTextFinder(l).findNext();
+    if (lbl) {
+      const r = lbl.getRow();
+      const sr = sheet.getRange(r, lbl.getColumn() + 1, 1, 5);
+      const vs = sr.getValues()[0];
+      for (let i = 0; i < vs.length; i++) {
+        if (vs[i] === 0 || vs[i] === "0" || typeof vs[i] === 'number') {
+          const c = sr.getCell(1, i + 1);
+          c.setValue(v);
+          c.setNumberFormat("#,##0");
+          return;
+        }
+      }
     }
   }
 }
