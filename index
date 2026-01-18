@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>注文書作成プレビュー</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+    body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background-color: #f1f5f9; }
+    .paper-stack { display: flex; flex-direction: column; align-items: center; gap: 40px; padding: 40px 0; }
+    .paper {
+      background: white;
+      width: 100%;
+      max-width: 850px;
+      min-height: 1100px;
+      padding: 40px 60px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
+    .inline-input {
+      border-bottom: 1px dashed #e2e8f0;
+      padding: 1px 4px;
+      transition: all 0.2s;
+      background: transparent;
+      width: 100%;
+    }
+    .inline-input:focus { outline: none; border-bottom: 1.5px solid #3b82f6; background-color: #eff6ff; }
+    .cell-label { 
+      background-color: #f8fafc; 
+      font-weight: bold; 
+      font-size: 0.7rem; 
+      border: 1px solid #1e293b; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      padding: 4px;
+      white-space: nowrap;
+    }
+    .cell-val {
+      border: 1px solid #1e293b;
+      padding: 4px 8px;
+      font-size: 0.75rem;
+    }
+    @media print {
+      body { background: white; padding: 0; }
+      .paper { box-shadow: none; margin: 0; width: 100%; max-width: none; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    const Icon = ({ name, className = "w-4 h-4", ...props }) => {
+      const lib = window.LucideReact || window.Lucide;
+      const Component = lib ? lib[name] : null;
+      if (!Component) return <div className={className} />;
+      return <Component className={className} {...props} />;
+    };
+
+    const App = () => {
+      const [loading, setLoading] = useState(true);
+      const [generating, setGenerating] = useState(false);
+      const [error, setError] = useState(null);
+      const [successUrl, setSuccessUrl] = useState(null);
+      const [orderData, setOrderData] = useState(null);
+      const [items, setItems] = useState([]);
+      const [selectedIds, setSelectedIds] = useState(new Set());
+      
+      const [editableInfo, setEditableInfo] = useState({
+        "得意先名１": "", "得意先名２": "", "得意先住所１": "", "得意先住所２": "",
+        "直送先名１": "", "直送先名２": "", "納入期日": "明治33年1月0日", "納入期日_付記": "着",
+        "締日": "0", "支払日": "当月末", "支払方法": ""
+      });
+
+      const paymentDateOptions = ["当月末", "翌月10日", "翌月20日", "翌月末", "翌々月10日"];
+      const ITEMS_P1 = 15;
+      const ITEMS_PN = 25;
+
+      const orderNo = typeof google !== 'undefined' ? "<?= orderNo ?>" : "232922";
+
+      useEffect(() => { fetchData(); }, []);
+
+      const fetchData = () => {
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run
+            .withSuccessHandler(res => { if (res.success) initData(res); setLoading(false); })
+            .withFailureHandler(() => { setError({ message: "データの取得に失敗しました" }); setLoading(false); })
+            .getData(orderNo);
+        } else {
+          setTimeout(() => {
+            const mockItems = Array.from({ length: 30 }, (_, i) => ({
+              tempId: i, "商品名": `水位センサ DS-1_50m計L=${(i+1)*5}m`, "数量": 1, "単価": 140000
+            }));
+            initData({ 
+              orderInfo: { 
+                "受注No": "232922", "得意先名１": "サンプル商事株式会社", "得意先住所１": "東京都港区芝公園4-2-8", "納期": "20240909", 
+                "直送先名": "現場:富山県", "請求締日": "31", "回収種別１": "従来通り", "回収種別２": "振込" 
+              }, 
+              items: mockItems 
+            });
+            setLoading(false);
+          }, 800);
+        }
+      };
+
+      const initData = (data) => {
+        const info = data.orderInfo;
+        setOrderData(info);
+        setItems(data.items.map((item, idx) => ({ ...item, tempId: idx })));
+        setSelectedIds(new Set(data.items.map((it, idx) => idx)));
+        
+        setEditableInfo(prev => ({
+          ...prev, 
+          "得意先名１": info["得意先名１"] || "", 
+          "得意先住所１": info["得意先住所１"] || "",
+          "直送先名１": info["直送先名"] || "", 
+          "納入期日": info["納期"] || "明治33年1月0日", 
+          "締日": info["請求締日"] || "0",
+          "支払方法": (info["回収種別１"] || "") + (info["回収種別２"] || "")
+        }));
+      };
+
+      const toggleItem = (id) => {
+        const newSet = new Set(selectedIds);
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+        setSelectedIds(newSet);
+      };
+
+      const validSelectedItems = useMemo(() => items.filter(it => {
+        const isSelected = selectedIds.has(it.tempId);
+        return isSelected && Number(it["数量"]) !== 0 && Number(it["単価"]) !== 0;
+      }), [items, selectedIds]);
+      
+      const pagedItems = useMemo(() => {
+        const pages = [];
+        let current = 0;
+        while (current < validSelectedItems.length || pages.length === 0) {
+          const limit = (pages.length === 0) ? ITEMS_P1 : ITEMS_PN;
+          pages.push(validSelectedItems.slice(current, current + limit));
+          current += limit;
+          if (current >= validSelectedItems.length && pages.length > 0) break;
+        }
+        return pages;
+      }, [validSelectedItems]);
+
+      const totals = useMemo(() => {
+        const subtotal = validSelectedItems.reduce((s, it) => s + (Number(it["数量"]) * Number(it["単価"])), 0);
+        return { subtotal, tax: Math.floor(subtotal * 0.1), totalWithTax: Math.floor(subtotal * 1.1) };
+      }, [validSelectedItems]);
+
+      const handleGenerate = () => {
+        setGenerating(true);
+        if (typeof google !== 'undefined') {
+          google.script.run.withSuccessHandler(res => {
+            if (res.success) setSuccessUrl(res.pdfUrl);
+            else setError({ message: res.message });
+            setGenerating(false);
+          }).generatePDF({...orderData, ...editableInfo}, validSelectedItems, totals);
+        } else {
+          setTimeout(() => { setError({ message: "デモモードです" }); setGenerating(false); }, 1500);
+        }
+      };
+
+      if (loading) return <div className="flex h-screen items-center justify-center font-bold text-slate-500 bg-slate-50">データを読込中...</div>;
+
+      return (
+        <div className="min-h-screen">
+          {generating && <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center text-white font-bold backdrop-blur-sm">PDFを生成中...</div>}
+          
+          <header className="bg-slate-900 text-white p-4 sticky top-0 z-40 shadow-lg no-print flex justify-between items-center">
+            <div className="max-w-6xl mx-auto w-full flex justify-between items-center px-4">
+              <div className="flex items-center space-x-2">
+                <Icon name="FileText" className="text-blue-400" />
+                <h1 className="font-bold text-sm sm:text-base whitespace-nowrap">注文書作成プレビュー ({pagedItems.length} ページ)</h1>
+              </div>
+              <button onClick={handleGenerate} className="bg-blue-600 px-8 py-2.5 rounded-xl font-bold hover:bg-blue-500 transition-all shadow-lg active:scale-95 text-sm">PDFを生成する</button>
+            </div>
+          </header>
+
+          <main className="paper-stack">
+            {successUrl && (
+              <div className="max-w-4xl w-full bg-emerald-50 p-6 border border-emerald-200 rounded-2xl flex justify-between items-center no-print shadow-sm mb-6 mx-auto">
+                <span className="text-emerald-800 font-bold flex items-center text-sm sm:text-base"><Icon name="CheckCircle2" className="mr-2" /> PDFが作成されました。ドライブを確認してください。</span>
+                <a href={successUrl} target="_blank" className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-emerald-700 shadow-md text-sm">PDFを開く</a>
+              </div>
+            )}
+
+            {pagedItems.map((pageItems, pageIdx) => {
+              const isFirst = pageIdx === 0;
+              const isLast = pageIdx === pagedItems.length - 1;
+              return (
+                <div key={pageIdx} className="paper">
+                  <div className="absolute top-6 right-12 text-[10px] font-bold text-slate-400">{pageIdx + 1} / {pagedItems.length} ページ</div>
+
+                  <div className="text-center mb-4 pt-2">
+                    <h1 className="text-4xl font-bold tracking-[1.5em] border-b-4 border-double border-slate-900 pb-1 inline-block whitespace-nowrap">注 文 書</h1>
+                  </div>
+
+                  {isFirst ? (
+                    <>
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="w-1/2 pt-10"><h2 className="text-xl font-bold border-b-2 border-slate-900 pb-1 inline-block pr-16 whitespace-nowrap">株式会社 オサシ・テクノス 御中</h2></div>
+                        <div className="w-1/2 text-right text-xs space-y-1">
+                          <div className="flex flex-col items-end">
+                            <div className="mb-2 font-bold">{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-slate-400 text-[10px]">住所</span>
+                              <input className="inline-input w-[250px] text-right font-bold" value={editableInfo["得意先住所１"]} onChange={e => setEditableInfo({...editableInfo, "得意先住所１": e.target.value})} />
+                            </div>
+                            <div className="flex items-center justify-end mt-1">
+                              <span className="text-slate-400 text-[10px] mr-2">社名</span>
+                              <input className="inline-input w-[250px] text-right font-bold text-lg" value={editableInfo["得意先名１"]} onChange={e => setEditableInfo({...editableInfo, "得意先名１": e.target.value})} />
+                              <span className="ml-2 font-bold">印</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-12 border border-slate-900 mb-6">
+                        <div className="col-span-8 flex flex-col divide-y divide-slate-900 border-r border-slate-900">
+                          <div className="flex h-9">
+                            <div className="w-28 cell-label">■ 納入期日 ■</div>
+                            <div className="flex-1 cell-val flex items-center justify-center">
+                              <input className="bg-transparent text-center w-full outline-none" value={editableInfo["納入期日"]} onChange={e => setEditableInfo({...editableInfo, "納入期日": e.target.value})} />
+                            </div>
+                            <div className="w-12 cell-label border-l border-slate-900">着</div>
+                          </div>
+                          <div className="flex h-9">
+                            <div className="w-28 cell-label">■ 納入場所 ■</div>
+                            <div className="flex-1 cell-val flex items-center">
+                              <input className="bg-transparent w-full outline-none" value={editableInfo["直送先名１"]} onChange={e => setEditableInfo({...editableInfo, "直送先名１": e.target.value})} />
+                            </div>
+                          </div>
+                          <div className="flex flex-col divide-y divide-slate-900">
+                            <div className="flex h-9 text-[10px]">
+                              <div className="w-28 cell-label">■ 支払条件 ■ 締日</div>
+                              <div className="flex-1 cell-val flex items-center justify-center font-bold">
+                                <input className="bg-transparent text-center w-full outline-none" value={editableInfo["締日"]} onChange={e => setEditableInfo({...editableInfo, "締日": e.target.value})} />
+                              </div>
+                            </div>
+                            <div className="flex h-9 text-[10px]">
+                              <div className="w-28 cell-label">支払日</div>
+                              <div className="flex-1 cell-val flex items-center">
+                                <select className="bg-transparent w-full outline-none cursor-pointer" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})}>
+                                  {paymentDateOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="flex h-9 text-[10px]">
+                              <div className="w-28 cell-label">支払方法</div>
+                              <div className="flex-1 cell-val flex items-center font-bold">
+                                <input className="bg-transparent w-full outline-none" value={editableInfo["支払方法"]} onChange={e => setEditableInfo({...editableInfo, "支払方法": e.target.value})} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-span-4 flex flex-col divide-y divide-slate-900">
+                          <div className="flex-1 flex items-center justify-between px-3 border-b border-slate-900">
+                            <span className="font-bold text-slate-400 text-[10px]">税抜合計</span>
+                            <span className="font-bold text-xs">¥{totals.subtotal.toLocaleString()}</span>
+                          </div>
+                          <div className="flex-1 flex items-center justify-between px-3 border-b border-slate-900">
+                            <span className="font-bold text-slate-400 text-[10px]">消費税</span>
+                            <span className="font-bold text-xs">¥{totals.tax.toLocaleString()}</span>
+                          </div>
+                          <div className="flex-[2] bg-slate-50 items-stretch flex flex-col justify-center">
+                            <div className="flex justify-between px-3 w-full">
+                              <span className="text-blue-700 font-bold text-[10px]">税込合計</span>
+                              <span className="text-xl font-black text-blue-800 italic leading-none">¥{totals.totalWithTax.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="h-10 border-b border-slate-300 mb-6 flex items-end">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Order No: {orderNo} (Cont.)</span>
+                    </div>
+                  )}
+
+                  <div className="mb-1 text-[10px] font-bold flex items-baseline space-x-2"><span>No.</span><span className="border-b border-slate-300 px-4 min-w-[120px] font-mono">{orderNo}</span></div>
+                  <table className="w-full border-collapse border border-slate-900 text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 h-9">
+                        <th className="border border-slate-900 p-2 w-10 no-print"></th>
+                        <th className="border border-slate-900 p-2 text-center font-bold text-xs whitespace-nowrap">品 名 ・ 型 式</th>
+                        <th className="border border-slate-900 p-2 w-16 text-center font-bold text-xs">数 量</th>
+                        <th className="border border-slate-900 p-2 w-24 text-center font-bold text-xs">単価 (円)</th>
+                        <th className="border border-slate-900 p-2 w-28 text-center font-bold text-xs">金額 (円)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageItems.map((item) => {
+                        const isSelected = selectedIds.has(item.tempId);
+                        return (
+                          <tr key={item.tempId} className={`h-9 transition-all ${isSelected ? '' : 'bg-slate-100 opacity-20 grayscale no-print'}`}>
+                            <td className="border border-slate-900 p-1 text-center no-print">
+                              <button 
+                                onClick={() => toggleItem(item.tempId)}
+                                className={`w-5 h-5 mx-auto rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-transparent hover:border-blue-400'}`}
+                              >
+                                <Icon name="Check" className="w-3.5 h-3.5" strokeWidth={4} />
+                              </button>
+                            </td>
+                            <td className="border border-slate-900 p-2 text-xs leading-tight" onClick={() => toggleItem(item.tempId)}>{item["商品名"]}</td>
+                            <td className="border border-slate-900 p-2 text-center text-xs">{item["数量"]}</td>
+                            <td className="border border-slate-900 p-2 text-right text-xs">¥{Number(item["単価"]).toLocaleString()}</td>
+                            <td className="border border-slate-900 p-2 text-right font-bold text-xs">¥{(Number(item["数量"]) * Number(item["単価"])).toLocaleString()}</td>
+                          </tr>
+                        );
+                      })}
+                      {[...Array(Math.max(0, (isFirst ? ITEMS_P1 : ITEMS_PN) - pageItems.length))].map((_, i) => (
+                        <tr key={`empty-${pageIdx}-${i}`} className="h-9"><td className="border border-slate-900 p-2" colSpan="5"></td></tr>
+                      ))}
+                    </tbody>
+                    {isLast ? (
+                      <tfoot>
+                        <tr className="h-10 bg-slate-50 font-bold border-t-2 border-slate-900">
+                          <td colSpan="4" className="border border-slate-900 p-2 text-center text-xs bg-slate-100 font-black">税込合計金額</td>
+                          <td className="border border-slate-900 p-2 text-right text-lg text-blue-800 italic pr-4">¥{totals.totalWithTax.toLocaleString()}</td>
+                        </tr>
+                      </tfoot>
+                    ) : (
+                      <tfoot>
+                         <tr className="h-10">
+                           <td colSpan="5" className="border-t border-slate-900 px-4 text-right text-[10px] font-bold text-slate-400 italic">次頁に続く</td>
+                         </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              );
+            })}
+          </main>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
