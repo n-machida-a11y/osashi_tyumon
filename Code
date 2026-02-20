@@ -1,10 +1,12 @@
 /**
  * 顧客捺印用注文書生成システム - Backend (GAS)
- * 修正版: AppSheet連携対応（juchuNoパラメータ対応）・本番運用版
+ * 修正版 v4: 
+ * - 住所の長文対応（自動折り返し設定）
+ * - 担当者名を社名欄から分離（％担当者名％へ出力）
  */
 
 const CONFIG = {
-  // 本番環境のID等に間違いがないか確認してください
+  // 環境ID設定 (変更なし)
   SS_ID: "1L2DgOm3gfEZMwoe2TDjzBJuq5cHB2SlBlwg6vifg5IE",
   TEMPLATE_SS_ID: "1CaL8QGsNKkpq06jI8QpwHAitCl03ZppsCvC8ILAXj30",
   FOLDER_ID: "1JTTVV4tbtfNW_f_FVxrC9alBFoxT70BC",
@@ -16,9 +18,8 @@ const CONFIG = {
 };
 
 function doGet(e) {
-  // AppSheetからのパラメータ(juchuNo)に対応
-  // パラメータがない場合はエラー回避のため空文字またはデフォルト値を設定
-  const orderNo = (e.parameter && (e.parameter.juchuNo || e.parameter.orderNo)) || "232922";
+  let orderNo = (e.parameter && (e.parameter.juchuNo || e.parameter.orderNo)) || "232922";
+  orderNo = String(orderNo).trim();
   
   const template = HtmlService.createTemplateFromFile('index');
   template.orderNo = orderNo;
@@ -31,18 +32,19 @@ function doGet(e) {
 
 function getData(orderNo) {
   try {
-    // getActiveSpreadsheet()は使わず、必ずopenByIdを使う
     const ss = SpreadsheetApp.openById(CONFIG.SS_ID);
     const mainSheet = ss.getSheetByName(CONFIG.SHEET_MAIN);
     const detailSheet = ss.getSheetByName(CONFIG.SHEET_DETAIL);
-    if (!mainSheet || !detailSheet) throw new Error("シートが見つかりません。IDやシート名を確認してください。");
+    if (!mainSheet || !detailSheet) throw new Error("シート設定エラー: IDやシート名を確認してください。");
 
     const mainData = mainSheet.getDataRange().getValues();
     const mainHeaders = mainData[0];
     const orderIndex = mainHeaders.indexOf("受注No");
-    // 数値型・文字列型の違いを吸収して検索
-    const mainRow = mainData.find(row => String(row[orderIndex]) === String(orderNo));
-    if (!mainRow) throw new Error(`受注No: ${orderNo} が見つかりません。`);
+    
+    const targetNo = String(orderNo).trim();
+    const mainRow = mainData.find(row => String(row[orderIndex]).trim() === targetNo);
+    
+    if (!mainRow) throw new Error(`受注No: ${targetNo} が見つかりません。`);
 
     const orderInfo = {};
     mainHeaders.forEach((h, i) => { orderInfo[h] = mainRow[i]; });
@@ -51,13 +53,12 @@ function getData(orderNo) {
     const detailHeaders = detailData[0];
     const dOrderIndex = detailHeaders.indexOf("受注No");
     
-    // 0のデータはあらかじめ除外
     const items = detailData.slice(1)
       .filter(row => {
-        if (String(row[dOrderIndex]) !== String(orderNo)) return false;
-        const q = Number(row[detailHeaders.indexOf("数量")]) || 0;
-        const p = Number(row[detailHeaders.indexOf("単価")]) || 0;
-        return q > 0 && p > 0;
+        if (String(row[dOrderIndex]).trim() !== targetNo) return false;
+        const q = Number(row[detailHeaders.indexOf("数量")]);
+        const p = Number(row[detailHeaders.indexOf("単価")]);
+        return !isNaN(q) && q > 0 && !isNaN(p) && p > 0;
       })
       .map(row => {
         const item = {};
@@ -67,20 +68,29 @@ function getData(orderNo) {
 
     return { success: true, orderInfo, items };
   } catch (e) {
+    console.error(e);
     return { success: false, message: e.toString() };
   }
 }
 
-function generatePDF(orderData, selectedItems, totals) {
+/**
+ * PDF生成処理
+ * @param {Object} orderData - 注文基本情報
+ * @param {Array} selectedItems - 選択された明細行
+ * @param {Object} totals - 合計金額情報
+ * @param {String} issueDateStr - 発行日
+ */
+function generatePDF(orderData, selectedItems, totals, issueDateStr) {
+  let newSSFile = null;
   try {
     const templateFile = DriveApp.getFileById(CONFIG.TEMPLATE_SS_ID);
     const folder = DriveApp.getFolderById(CONFIG.FOLDER_ID);
     
     const todayStr = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");
-    const fileName = `${orderNoClean(orderData["受注No"])}_${orderData["得意先名１"]}_${todayStr}_${totals.totalWithTax}円`;
+    const safeOrderNo = orderNoClean(orderData["受注No"]);
+    const fileName = `${safeOrderNo}_${orderData["得意先名１"]}_${todayStr}_${totals.totalWithTax}円`;
     
-    const newSSFile = templateFile.makeCopy("TEMP_" + Utilities.getUuid(), folder);
-    // ここもopenByIdを使用
+    newSSFile = templateFile.makeCopy("TEMP_" + Utilities.getUuid(), folder);
     const newSS = SpreadsheetApp.openById(newSSFile.getId());
     
     const templateSheet = newSS.getSheets()[0];
@@ -110,11 +120,30 @@ function generatePDF(orderData, selectedItems, totals) {
       const sheet = templateSheet.copyTo(newSS);
       sheet.setName(`P${index + 1}`);
 
+      const printDate = issueDateStr ? 
+          issueDateStr.replace(/\//g, '年').replace(/(\d{2})$/, '月$1日').replace('年月', '月') :
+          (issueDateStr || Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日"));
+
+      // 担当者名の処理: 社名との結合をやめ、分離して出力
+      let contactName = "";
+      if (isFirst && orderData["担当者名"]) {
+        contactName = orderData["担当者名"] + " 様";
+      }
+
+      // 【修正】住所が長い場合に途切れないよう、セル設定を「折り返し」に変更
+      if (isFirst) {
+        const addressRanges = sheet.createTextFinder("％得意先住所１％").findAll();
+        addressRanges.forEach(range => {
+          range.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+        });
+      }
+
       const replacements = {
-        "％受注日％": isFirst ? Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日") : "",
+        "％受注日％": isFirst ? printDate : "",
         "％見積番号％": isFirst ? (orderData["受注No"] || "") : "",
         "％得意先住所１％": isFirst ? (orderData["得意先住所１"] || "") : "",
-        "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "",
+        "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "", // 社名のみ
+        "％担当者名％": contactName, // 新規: 担当者名はここへ出力 (テンプレートに記述が必要)
         "％直送先名１％": isFirst ? (orderData["直送先名１"] || "") : "",
         "%得意先住所2%": isFirst ? (orderData["得意先住所１"] || "") : "",
         "%得意先名2%": isFirst ? (orderData["得意先名１"] || "") : "",
@@ -143,7 +172,7 @@ function generatePDF(orderData, selectedItems, totals) {
               const rangeToClear = sheet.getRange(2, 1, numRowsToDelete, sheet.getLastColumn());
               rangeToClear.clearContent();
               rangeToClear.setBorder(false, false, false, false, false, false);
-              try { sheet.deleteRows(2, numRowsToDelete); } catch(e) {}
+              try { sheet.deleteRows(2, numRowsToDelete); } catch(e) { console.warn("Row delete failed", e); }
             }
           }
         }
@@ -157,11 +186,13 @@ function generatePDF(orderData, selectedItems, totals) {
         setNumeric(sheet, "％消費税％", "消費税", totals.tax);
         setNumeric(sheet, "％税込合計％", "税込合計", totals.totalWithTax);
       } else {
+        // 2枚目以降は合計欄もクリア
         sheet.createTextFinder("％税抜合計％").replaceAllWith("");
         sheet.createTextFinder("％消費税％").replaceAllWith("");
         sheet.createTextFinder("％税込合計％").replaceAllWith("");
       }
 
+      // 小計欄の処理：途中ページの「次頁に続く」は廃止し、空白にする
       const subFinder = sheet.createTextFinder("小計").findNext();
       if (subFinder) {
          const row = subFinder.getRow();
@@ -181,12 +212,15 @@ function generatePDF(orderData, selectedItems, totals) {
          }
 
          if (targetCell) {
-             if (!isLast) {
-                 sheet.createTextFinder("％税込合計％").replaceAllWith("次頁に続く");
-                 targetCell.setNumberFormat("@"); 
-                 targetCell.setValue("(( 次頁に続く ))").setHorizontalAlignment("right");
-             } else {
+             if (isLast) {
+                 // 最終ページのみ小計を表示
                  targetCell.setValue(totals.subtotal).setNumberFormat("#,##0");
+             } else {
+                 // 途中ページは「次頁に続く」も表示せず、空白にする
+                 targetCell.clearContent();
+                 // 【修正】「小計」というラベル自体も消す
+                 subFinder.setValue("");
+                 sheet.createTextFinder("％税込合計％").replaceAllWith(""); 
              }
          }
       }
@@ -223,22 +257,33 @@ function generatePDF(orderData, selectedItems, totals) {
     const data = mainSheet.getDataRange().getValues();
     const headers = data[0];
     const orderIndex = headers.indexOf("受注No");
+    
     let pdfIdx = headers.indexOf(CONFIG.PDF_COL_NAME);
     if (pdfIdx === -1) {
       pdfIdx = headers.length;
       mainSheet.getRange(1, pdfIdx + 1).setValue(CONFIG.PDF_COL_NAME);
     }
+    
+    const safeOrderNoRaw = String(orderData["受注No"]).trim();
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][orderIndex]) === String(orderData["受注No"])) {
+      if (String(data[i][orderIndex]).trim() === safeOrderNoRaw) {
         mainSheet.getRange(i + 1, pdfIdx + 1).setValue(pdfFile.getUrl());
         break;
       }
     }
 
-    newSSFile.setTrashed(true);
     return { success: true, pdfUrl: pdfFile.getUrl() };
   } catch (e) {
+    console.error("PDF Generation Error: " + e.toString());
     return { success: false, message: e.toString() };
+  } finally {
+    if (newSSFile) {
+      try {
+        newSSFile.setTrashed(true);
+      } catch(e) {
+        console.warn("Failed to trash temp file: " + e.toString());
+      }
+    }
   }
 }
 
