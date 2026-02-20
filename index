@@ -124,24 +124,28 @@
       const formatDateJP = (dateVal) => {
         if (!dateVal && dateVal !== 0) return "";
         if (dateVal === 0) return "";
+        // YYYYMMDD形式の数値・文字列を最初に判定（例: 20240909）
+        const s = String(dateVal);
+        if (/^\d{8}$/.test(s)) {
+          return `${s.slice(0,4)}年${s.slice(4,6)}月${s.slice(6,8)}日`;
+        }
         try {
           let d;
           if (typeof dateVal === 'number') {
             // スプレッドシートのシリアル値（1900/1/1起点の日数）→ UTC基準のDate
-            // 25569 = 1970/1/1 のシリアル値
             d = new Date((dateVal - 25569) * 86400000);
           } else {
             d = new Date(dateVal);
           }
-          if (isNaN(d.getTime())) return String(dateVal);
+          if (isNaN(d.getTime())) return s;
           // UTC基準で年月日を取得（タイムゾーンのズレを防ぐ）
           const y = d.getUTCFullYear();
-          if (y < 1900 || y > 2200) return String(dateVal);
+          if (y < 1900 || y > 2200) return s;
           const m = ('0' + (d.getUTCMonth() + 1)).slice(-2);
           const day = ('0' + d.getUTCDate()).slice(-2);
           return `${y}年${m}月${day}日`;
         } catch (e) {
-          return String(dateVal);
+          return s;
         }
       };
 
