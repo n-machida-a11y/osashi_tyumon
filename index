@@ -334,7 +334,7 @@
                       <div className="w-[55%] text-right text-xs space-y-2">
                         <div className="flex flex-col items-end">
                           <div className="mb-4 font-bold text-sm">
-                            {issueDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
+                            {`${issueDate.getFullYear()}年${('0'+(issueDate.getMonth()+1)).slice(-2)}月${('0'+issueDate.getDate()).slice(-2)}日`}
                           </div>
                           
                           <div className="flex items-start justify-end w-full mb-1">
