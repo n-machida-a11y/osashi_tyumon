@@ -32,6 +32,20 @@
       width: 100%;
     }
     .inline-input:focus { outline: none; border-bottom: 1.5px solid #3b82f6; background-color: #eff6ff; }
+    
+    /* テキストエリア用のスタイル調整 */
+    .inline-textarea {
+      border-bottom: 1px dashed #e2e8f0;
+      padding: 1px 4px;
+      transition: all 0.2s;
+      background: transparent;
+      width: 100%;
+      resize: none;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+    .inline-textarea:focus { outline: none; border-bottom: 1.5px solid #3b82f6; background-color: #eff6ff; }
+
     .cell-label { 
       background-color: #f8fafc; 
       font-weight: bold; 
@@ -56,13 +70,13 @@
   </style>
 </head>
 <body>
-  <!-- GASから値を渡すための隠しフィールド（ここを変更：JS内での埋め込みを回避） -->
+  <!-- GASから値を渡すための隠しフィールド -->
   <input type="hidden" id="initial-order-no" value="<?= orderNo ?>">
   
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
     const Icon = ({ name, className = "w-4 h-4", ...props }) => {
       const lib = window.LucideReact || window.Lucide;
@@ -76,44 +90,86 @@
       const [generating, setGenerating] = useState(false);
       const [error, setError] = useState(null);
       const [successUrl, setSuccessUrl] = useState(null);
+      
       const [orderData, setOrderData] = useState(null);
       const [items, setItems] = useState([]);
       const [selectedIds, setSelectedIds] = useState(new Set());
-      
+      const [issueDate] = useState(new Date());
+
       const [editableInfo, setEditableInfo] = useState({
-        "得意先名１": "", "得意先住所１": "", "直送先名１": "", "納入期日": "", "締日": "", "支払日": "当月末", "支払方法": ""
+        "得意先名１": "", 
+        "得意先住所１": "", 
+        "担当者名": "",
+        "直送先名１": "", 
+        "納入期日": "", 
+        "締日": "", 
+        "支払日": "当月末", 
+        "支払方法": ""
       });
 
       const paymentDateOptions = ["当月末", "翌月10日", "翌月20日", "翌月末", "翌々月10日"];
       const ITEMS_P1 = 15;
       const ITEMS_PN = 25;
 
-      // 修正箇所：JavaScriptコード内でのスクリプトレット使用をやめ、DOMから値を取得
-      // これにより「形式が正しくない HTML コンテンツ」エラーを回避
       const orderNo = document.getElementById('initial-order-no').value || "232922";
 
-      useEffect(() => { fetchData(); }, []);
+      const adjustHeight = (el) => {
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = el.scrollHeight + 'px';
+      };
 
-      const fetchData = () => {
-        if (typeof google !== 'undefined' && google.script && google.script.run) {
-          google.script.run
-            .withSuccessHandler(res => { if (res.success) initData(res); setLoading(false); })
-            .withFailureHandler(() => { setError({ message: "データの取得に失敗しました" }); setLoading(false); })
-            .getData(orderNo);
-        } else {
-          // 本番環境ではGoogle Scriptが必須のため、ローカル用のデモデータは削除またはエラー表示
-          setError({ message: "Google Apps Script環境で実行してください" });
-          setLoading(false);
+      // 日付フォーマット関数 (yyyy年MM月dd日)
+      const formatDateJP = (dateVal) => {
+        if (!dateVal) return "";
+        try {
+          const d = new Date(dateVal);
+          if (isNaN(d.getTime())) return dateVal; // 日付でない場合はそのまま
+          const y = d.getFullYear();
+          const m = ('0' + (d.getMonth() + 1)).slice(-2);
+          const day = ('0' + d.getDate()).slice(-2);
+          return `${y}年${m}月${day}日`;
+        } catch (e) {
+          return dateVal;
         }
       };
 
+      const fetchData = useCallback(() => {
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run
+            .withSuccessHandler(res => { 
+              if (res.success) {
+                initData(res); 
+              } else {
+                setError({ message: res.message || "データの取得に失敗しました" });
+              }
+              setLoading(false); 
+            })
+            .withFailureHandler(err => { 
+              console.error(err);
+              setError({ message: "サーバー通信エラーが発生しました" }); 
+              setLoading(false); 
+            })
+            .getData(orderNo);
+        } else {
+          console.warn("Google Script Environment not found.");
+          setError({ message: "Google Apps Script環境で実行してください" });
+          setLoading(false);
+        }
+      }, [orderNo]);
+
+      useEffect(() => { fetchData(); }, [fetchData]);
+
       const initData = (data) => {
-        const info = data.orderInfo;
+        const info = data.orderInfo || {};
         setOrderData(info);
         
-        // 数量・単価が0のものを除外
-        const filteredItems = data.items
-          .filter(it => (Number(it["数量"]) || 0) > 0 && (Number(it["単価"]) || 0) > 0)
+        const filteredItems = (data.items || [])
+          .filter(it => {
+            const q = Number(it["数量"]);
+            const p = Number(it["単価"]);
+            return !isNaN(q) && q > 0 && !isNaN(p) && p > 0;
+          })
           .map((item, idx) => ({ ...item, tempId: idx }));
 
         setItems(filteredItems);
@@ -122,8 +178,9 @@
         setEditableInfo({
           "得意先名１": info["得意先名１"] || "", 
           "得意先住所１": info["得意先住所１"] || "",
+          "担当者名": "", 
           "直送先名１": info["直送先名"] || "", 
-          "納入期日": info["納期"] || "", 
+          "納入期日": formatDateJP(info["納期"]), // 納期を整形して反映
           "締日": info["請求締日"] || "",
           "支払日": "当月末",
           "支払方法": (info["回収種別１"] || "") + (info["回収種別２"] || "")
@@ -137,12 +194,22 @@
         setSelectedIds(newSet);
       };
 
+      const togglePageItems = (pageItems, check) => {
+        const newSet = new Set(selectedIds);
+        pageItems.forEach(it => {
+          if (check) newSet.add(it.tempId);
+          else newSet.delete(it.tempId);
+        });
+        setSelectedIds(newSet);
+      };
+
       const validSelectedItems = useMemo(() => items.filter(it => selectedIds.has(it.tempId)), [items, selectedIds]);
       
       const pagedItems = useMemo(() => {
         const pages = [];
         let current = 0;
         if (items.length === 0) return [[]];
+        
         while (current < items.length) {
           const limit = (pages.length === 0) ? ITEMS_P1 : ITEMS_PN;
           pages.push(items.slice(current, current + limit));
@@ -153,18 +220,38 @@
 
       const totals = useMemo(() => {
         const subtotal = validSelectedItems.reduce((s, it) => s + (Number(it["数量"]) * Number(it["単価"])), 0);
-        return { subtotal, tax: Math.floor(subtotal * 0.1), totalWithTax: Math.floor(subtotal * 1.1) };
+        const tax = Math.floor(subtotal * 0.1);
+        const totalWithTax = subtotal + tax; 
+        return { subtotal, tax, totalWithTax };
       }, [validSelectedItems]);
 
       const handleGenerate = () => {
         if (validSelectedItems.length === 0) return;
         setGenerating(true);
+        setError(null);
+        
         if (typeof google !== 'undefined') {
-          google.script.run.withSuccessHandler(res => {
-            if (res.success) setSuccessUrl(res.pdfUrl);
-            else setError({ message: res.message });
-            setGenerating(false);
-          }).generatePDF({...orderData, ...editableInfo}, validSelectedItems, totals);
+          const issueDateStr = issueDate.toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' });
+
+          google.script.run
+            .withSuccessHandler(res => {
+              if (res.success) {
+                setSuccessUrl(res.pdfUrl);
+              } else {
+                setError({ message: res.message || "PDF生成中にエラーが発生しました" });
+              }
+              setGenerating(false);
+            })
+            .withFailureHandler(err => {
+              setError({ message: "PDF生成リクエストが失敗しました" });
+              setGenerating(false);
+            })
+            .generatePDF(
+              {...orderData, ...editableInfo}, 
+              validSelectedItems, 
+              totals,
+              issueDateStr
+            );
         }
       };
 
@@ -206,8 +293,8 @@
 
             {pagedItems.map((pageItems, pageIdx) => {
               const isFirst = pageIdx === 0;
-              const hasMore = pagedItems.length > 1 && pageIdx < pagedItems.length - 1;
-
+              const isLast = pageIdx === pagedItems.length - 1;
+              
               return (
                 <div key={pageIdx} className="paper">
                   <div className="absolute top-6 right-12 text-[10px] font-bold text-slate-400">{pageIdx + 1} / {pagedItems.length} ページ</div>
@@ -218,19 +305,53 @@
 
                   {isFirst && (
                     <div className="flex justify-between items-start mb-4">
-                      <div className="w-1/2 pt-10"><h2 className="text-xl font-bold border-b-2 border-slate-900 pb-1 inline-block pr-16">株式会社 オサシ・テクノス 御中</h2></div>
-                      <div className="w-1/2 text-right text-xs space-y-1">
+                      <div className="w-[45%] pt-10">
+                        {/* 修正：whitespace-nowrapを追加して一行表示を強制 */}
+                        <h2 className="text-xl font-bold border-b-2 border-slate-900 pb-1 inline-block pr-16 whitespace-nowrap">株式会社 オサシ・テクノス 御中</h2>
+                      </div>
+                      
+                      <div className="w-[55%] text-right text-xs space-y-2">
                         <div className="flex flex-col items-end">
-                          <div className="mb-2 font-bold">{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-slate-400 text-[10px]">住所</span>
-                            <input className="inline-input w-[250px] text-right font-bold" value={editableInfo["得意先住所１"]} onChange={e => setEditableInfo({...editableInfo, "得意先住所１": e.target.value})} />
+                          <div className="mb-4 font-bold text-sm">
+                            {issueDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
                           </div>
-                          <div className="flex items-center justify-end mt-1">
-                            <span className="text-slate-400 text-[10px] mr-2">社名</span>
-                            <input className="inline-input w-[250px] text-right font-bold text-lg" value={editableInfo["得意先名１"]} onChange={e => setEditableInfo({...editableInfo, "得意先名１": e.target.value})} />
-                            <span className="ml-2 font-bold">印</span>
+                          
+                          <div className="flex items-start justify-end w-full mb-1">
+                            <span className="text-slate-400 text-[10px] mr-2 mt-1 whitespace-nowrap">住所</span>
+                            <textarea 
+                              className="inline-textarea w-[320px] text-right font-bold" 
+                              rows={1}
+                              value={editableInfo["得意先住所１"]} 
+                              onChange={e => {
+                                setEditableInfo({...editableInfo, "得意先住所１": e.target.value});
+                                adjustHeight(e.target);
+                              }}
+                              onFocus={e => adjustHeight(e.target)}
+                              style={{ minHeight: '24px' }}
+                            />
                           </div>
+
+                          <div className="flex items-end justify-end w-full mt-1">
+                            <span className="text-slate-400 text-[10px] mr-2 mb-1 whitespace-nowrap">社名</span>
+                            <input 
+                              className="inline-input w-[320px] text-right font-bold text-lg" 
+                              value={editableInfo["得意先名１"]} 
+                              onChange={e => setEditableInfo({...editableInfo, "得意先名１": e.target.value})} 
+                            />
+                            <span className="ml-2 font-bold mb-1">印</span>
+                          </div>
+
+                          <div className="flex items-end justify-end w-full mt-2">
+                            <span className="text-slate-400 text-[10px] mr-2 mb-1 whitespace-nowrap">担当者</span>
+                            <input 
+                              className="inline-input w-[200px] text-right font-bold" 
+                              value={editableInfo["担当者名"]} 
+                              onChange={e => setEditableInfo({...editableInfo, "担当者名": e.target.value})} 
+                              placeholder="担当者名"
+                            />
+                            <span className="ml-2 font-bold mb-1">様</span>
+                          </div>
+
                         </div>
                       </div>
                     </div>
@@ -248,7 +369,13 @@
                       <div className="col-span-4 flex flex-col divide-y divide-slate-900">
                         <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">税抜合計</span><span className="text-xs font-bold">¥{totals.subtotal.toLocaleString()}</span></div>
                         <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">消費税</span><span className="text-xs font-bold">¥{totals.tax.toLocaleString()}</span></div>
-                        <div className="flex-[2] bg-slate-50 flex flex-col justify-center px-3"><div className="flex justify-between items-baseline"><span className="text-[10px] text-blue-700 font-bold">税込合計</span><span className="text-xl font-black text-blue-800 italic">¥{totals.totalWithTax.toLocaleString()}</span></div></div>
+                        <div className="flex-[2] bg-slate-50 flex flex-col justify-center px-3">
+                          <div className="flex justify-between items-baseline">
+                            <span className="text-[10px] text-blue-700 font-bold">税込合計</span>
+                            {/* 修正：italicを削除 */}
+                            <span className="text-xl font-black text-blue-800">¥{totals.totalWithTax.toLocaleString()}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -256,7 +383,13 @@
                   <table className="w-full border-collapse border border-slate-900 text-sm">
                     <thead>
                       <tr className="bg-slate-50 h-9">
-                        <th className="border border-slate-900 w-10 no-print text-center"><input type="checkbox" checked={pageItems.every(it => selectedIds.has(it.tempId))} onChange={(e) => { const n = new Set(selectedIds); pageItems.forEach(it => e.target.checked ? n.add(it.tempId) : n.delete(it.tempId)); setSelectedIds(n); }} /></th>
+                        <th className="border border-slate-900 w-10 no-print text-center">
+                          <input 
+                            type="checkbox" 
+                            checked={pageItems.every(it => selectedIds.has(it.tempId))} 
+                            onChange={(e) => togglePageItems(pageItems, e.target.checked)} 
+                          />
+                        </th>
                         <th className="border border-slate-900 p-2 text-center text-xs">品 名 ・ 型 式</th>
                         <th className="border border-slate-900 w-16 text-center text-xs">数 量</th>
                         <th className="border border-slate-900 w-24 text-center text-xs">単価 (円)</th>
@@ -281,10 +414,14 @@
                       ))}
                     </tbody>
                     <tfoot>
-                      {pageIdx === pagedItems.length - 1 ? (
-                        <tr className="h-10 bg-slate-50 font-bold border-t-2 border-slate-900"><td colSpan="4" className="border border-slate-900 text-center text-xs bg-slate-100">税込合計金額</td><td className="border border-slate-900 text-right p-2 text-lg text-blue-800 italic">¥{totals.totalWithTax.toLocaleString()}</td></tr>
+                      {isLast ? (
+                        <tr className="h-10 bg-slate-50 font-bold border-t-2 border-slate-900">
+                          <td colSpan="4" className="border border-slate-900 text-center text-xs bg-slate-100">税込合計金額</td>
+                          {/* 修正：italicを削除 */}
+                          <td className="border border-slate-900 text-right p-2 text-lg text-blue-800">¥{totals.totalWithTax.toLocaleString()}</td>
+                        </tr>
                       ) : (
-                        <tr className="h-8"><td colSpan="5" className="px-4 text-right text-[10px] font-bold text-slate-400 italic">次頁に続く</td></tr>
+                        <tr className="h-8"><td colSpan="5" className="border-t border-slate-900"></td></tr>
                       )}
                     </tfoot>
                   </table>
