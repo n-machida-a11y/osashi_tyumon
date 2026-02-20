@@ -97,13 +97,14 @@
       const [issueDate] = useState(new Date());
 
       const [editableInfo, setEditableInfo] = useState({
-        "得意先名１": "", 
-        "得意先住所１": "", 
+        "得意先名１": "",
+        "得意先住所１": "",
         "担当者名": "",
-        "直送先名１": "", 
-        "納入期日": "", 
-        "締日": "", 
-        "支払日": "当月末", 
+        "担当敬称": "様",
+        "直送先名１": "",
+        "納入期日": "",
+        "締日": "",
+        "支払日": "当月末",
         "支払方法": ""
       });
 
@@ -175,17 +176,22 @@
         setItems(filteredItems);
         setSelectedIds(new Set(filteredItems.map(it => it.tempId)));
         
-        const zip = info["郵便番号"] ? `〒${info["郵便番号"]}` : "";
-        const addressFull = [zip, info["住所１"] || "", info["住所２"] || ""]
-          .filter(v => v)
-          .join("\n");
+        // 得意先マスタから取得した情報を優先使用
+        const addr1 = info["M_住所１"] || info["住所１"] || "";
+        const addr2 = info["M_住所２"] || info["住所２"] || "";
+        const addressFull = [addr1, addr2].filter(v => v).join("\n");
+
+        const name1 = info["M_得意先名１"] || info["直送先名"] || "";
+        const name2 = info["M_得意先名２"] || "";
+        const companyName = [name1, name2].filter(v => v).join(" ");
 
         setEditableInfo({
-          "得意先名１": info["直送先名"] || "",
+          "得意先名１": companyName,
           "得意先住所１": addressFull,
-          "担当者名": info["先方担当者名"] || "",
+          "担当者名": info["M_先方担当者名"] || info["先方担当者名"] || "",
+          "担当敬称": info["M_担当敬称"] || "様",
           "直送先名１": info["直送先名"] || "",
-          "納入期日": formatDateJP(info["納期"]), // 納期を整形して反映
+          "納入期日": formatDateJP(info["納期"]),
           "締日": info["請求締日"] || "",
           "支払日": "当月末",
           "支払方法": (info["回収種別１"] || "") + (info["回収種別２"] || "")
@@ -354,7 +360,7 @@
                               onChange={e => setEditableInfo({...editableInfo, "担当者名": e.target.value})} 
                               placeholder="担当者名"
                             />
-                            <span className="ml-2 font-bold mb-1">様</span>
+                            <span className="ml-2 font-bold mb-1">{editableInfo["担当敬称"] || "様"}</span>
                           </div>
 
                         </div>
@@ -414,7 +420,7 @@
                           </tr>
                         );
                       })}
-                      {[...Array(Math.max(0, (isFirst ? ITEMS_P1 : ITEMS_PN) - pageItems.length))].map((_, i) => (
+                      {!isFirst && [...Array(Math.max(0, ITEMS_PN - pageItems.length))].map((_, i) => (
                         <tr key={i} className="h-9"><td colSpan="5" className="border border-slate-900"></td></tr>
                       ))}
                     </tbody>

@@ -1,8 +1,9 @@
 /**
  * 顧客捺印用注文書生成システム - Backend (GAS)
- * 修正版 v4: 
- * - 住所の長文対応（自動折り返し設定）
- * - 担当者名を社名欄から分離（％担当者名％へ出力）
+ * 修正版 v5:
+ * - 得意先マスタから住所・社名・担当者を取得
+ * - 1枚目の空行削除
+ * - PDF生成速度改善（一括置換処理）
  */
 
 const CONFIG = {
@@ -12,6 +13,7 @@ const CONFIG = {
   FOLDER_ID: "1JTTVV4tbtfNW_f_FVxrC9alBFoxT70BC",
   SHEET_MAIN: "受注データ",
   SHEET_DETAIL: "受注明細",
+  SHEET_CUSTOMER_MASTER: "得意先マスタ",
   PDF_COL_NAME: "捺印用PDF",
   ITEMS_PER_PAGE_P1: 15,
   ITEMS_PER_PAGE_PN: 25
@@ -20,10 +22,10 @@ const CONFIG = {
 function doGet(e) {
   let orderNo = (e.parameter && (e.parameter.juchuNo || e.parameter.orderNo)) || "232922";
   orderNo = String(orderNo).trim();
-  
+
   const template = HtmlService.createTemplateFromFile('index');
   template.orderNo = orderNo;
-  
+
   return template.evaluate()
     .setTitle("注文書作成システム")
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -40,19 +42,44 @@ function getData(orderNo) {
     const mainData = mainSheet.getDataRange().getValues();
     const mainHeaders = mainData[0];
     const orderIndex = mainHeaders.indexOf("受注No");
-    
+
     const targetNo = String(orderNo).trim();
     const mainRow = mainData.find(row => String(row[orderIndex]).trim() === targetNo);
-    
+
     if (!mainRow) throw new Error(`受注No: ${targetNo} が見つかりません。`);
 
     const orderInfo = {};
     mainHeaders.forEach((h, i) => { orderInfo[h] = mainRow[i]; });
 
+    // 得意先マスタから住所・社名・担当者を取得
+    const masterSheet = ss.getSheetByName(CONFIG.SHEET_CUSTOMER_MASTER);
+    if (masterSheet) {
+      const masterData = masterSheet.getDataRange().getValues();
+      const masterHeaders = masterData[0];
+      const customerCode = String(orderInfo["得意先コード"] || "").trim();
+
+      if (customerCode) {
+        const masterRow = masterData.slice(1).find(row =>
+          String(row[0]).trim() === customerCode  // A列 = 得意先コード
+        );
+
+        if (masterRow) {
+          const masterInfo = {};
+          masterHeaders.forEach((h, i) => { masterInfo[h] = masterRow[i]; });
+          orderInfo["M_住所１"] = masterInfo["住所１"] || "";
+          orderInfo["M_住所２"] = masterInfo["住所２"] || "";
+          orderInfo["M_得意先名１"] = masterInfo["得意先名１"] || "";
+          orderInfo["M_得意先名２"] = masterInfo["得意先名２"] || "";
+          orderInfo["M_先方担当者名"] = masterInfo["先方担当者名"] || "";
+          orderInfo["M_担当敬称"] = masterInfo["担当敬称"] || "";
+        }
+      }
+    }
+
     const detailData = detailSheet.getDataRange().getValues();
     const detailHeaders = detailData[0];
     const dOrderIndex = detailHeaders.indexOf("受注No");
-    
+
     const items = detailData.slice(1)
       .filter(row => {
         if (String(row[dOrderIndex]).trim() !== targetNo) return false;
@@ -74,6 +101,36 @@ function getData(orderNo) {
 }
 
 /**
+ * シート全体のテキストを一括置換（API呼び出し回数を最小化）
+ */
+function bulkTextReplace(sheet, replacements) {
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  let changed = false;
+  const entries = Object.entries(replacements);
+
+  for (let r = 0; r < values.length; r++) {
+    for (let c = 0; c < values[r].length; c++) {
+      const cell = values[r][c];
+      if (typeof cell === 'string' && cell !== '') {
+        let newVal = cell;
+        for (const [k, v] of entries) {
+          if (newVal.includes(k)) {
+            newVal = newVal.split(k).join(String(v));
+          }
+        }
+        if (newVal !== cell) {
+          values[r][c] = newVal;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) range.setValues(values);
+}
+
+/**
  * PDF生成処理
  * @param {Object} orderData - 注文基本情報
  * @param {Array} selectedItems - 選択された明細行
@@ -85,23 +142,24 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
   try {
     const templateFile = DriveApp.getFileById(CONFIG.TEMPLATE_SS_ID);
     const folder = DriveApp.getFolderById(CONFIG.FOLDER_ID);
-    
+
     const todayStr = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");
     const safeOrderNo = orderNoClean(orderData["受注No"]);
     const fileName = `${safeOrderNo}_${orderData["得意先名１"]}_${todayStr}_${totals.totalWithTax}円`;
-    
+
     newSSFile = templateFile.makeCopy("TEMP_" + Utilities.getUuid(), folder);
     const newSS = SpreadsheetApp.openById(newSSFile.getId());
-    
+
     const templateSheet = newSS.getSheets()[0];
     templateSheet.setName("TEMPLATE_ORIGIN");
 
+    // 金額列の位置をテンプレートから一度だけ取得
     let amountCol = 0;
-    const headerFinder = templateSheet.createTextFinder("金額").findNext(); 
+    const headerFinder = templateSheet.createTextFinder("金額").findNext();
     if (headerFinder) {
         amountCol = headerFinder.getColumn();
     }
-    
+
     const pages = [];
     let currentIdx = 0;
     while (currentIdx < selectedItems.length || (pages.length === 0)) {
@@ -116,7 +174,7 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
     pages.forEach((pageItems, index) => {
       const isFirst = (index === 0);
       const isLast = (index === totalPages - 1);
-      
+
       const sheet = templateSheet.copyTo(newSS);
       sheet.setName(`P${index + 1}`);
 
@@ -124,26 +182,20 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
           ? issueDateStr.replace(/(\d{4})\/(\d{2})\/(\d{2})/, '$1年$2月$3日')
           : Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日");
 
-      // 担当者名の処理: 社名との結合をやめ、分離して出力
+      // 担当者名と担当敬称を結合
       let contactName = "";
       if (isFirst && orderData["担当者名"]) {
-        contactName = orderData["担当者名"] + " 様";
+        const suffix = orderData["担当敬称"] || "様";
+        contactName = orderData["担当者名"] + " " + suffix;
       }
 
-      // 【修正】住所が長い場合に途切れないよう、セル設定を「折り返し」に変更
-      if (isFirst) {
-        const addressRanges = sheet.createTextFinder("％得意先住所１％").findAll();
-        addressRanges.forEach(range => {
-          range.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-        });
-      }
-
-      const replacements = {
+      // テキスト置換を一括処理（createTextFinderのAPI呼び出し回数を削減）
+      const textReplacements = {
         "％受注日％": isFirst ? printDate : "",
         "％見積番号％": isFirst ? (orderData["受注No"] || "") : "",
         "％得意先住所１％": isFirst ? (orderData["得意先住所１"] || "") : "",
-        "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "", // 社名のみ
-        "％担当者名％": contactName, // 新規: 担当者名はここへ出力 (テンプレートに記述が必要)
+        "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "",
+        "％担当者名％": contactName,
         "％直送先名１％": isFirst ? (orderData["直送先名１"] || "") : "",
         "%得意先住所2%": isFirst ? (orderData["得意先住所１"] || "") : "",
         "%得意先名2%": isFirst ? (orderData["得意先名１"] || "") : "",
@@ -157,18 +209,16 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         "次ページへ": ""
       };
 
-      Object.keys(replacements).forEach(k => {
-        sheet.createTextFinder(k).replaceAllWith(replacements[k]);
-      });
+      bulkTextReplace(sheet, textReplacements);
 
       sheet.getRange(1, 6).setValue(`${index + 1} / ${totalPages} ページ`);
 
       if (!isFirst) {
-        let headerFinder = sheet.createTextFinder("品名").findNext();
-        if (!headerFinder) headerFinder = sheet.createTextFinder("商品名").findNext();
+        let hdrFinder = sheet.createTextFinder("品名").findNext();
+        if (!hdrFinder) hdrFinder = sheet.createTextFinder("商品名").findNext();
 
-        if (headerFinder) {
-          const headerRow = headerFinder.getRow();
+        if (hdrFinder) {
+          const headerRow = hdrFinder.getRow();
           if (headerRow > 3) {
             const numRowsToDelete = headerRow - 3;
             if (numRowsToDelete > 0) {
@@ -179,7 +229,7 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
             }
           }
         }
-        
+
         const clearLabels = ["支払", "締日", "当月", "翌月", "従来通り", "振込", "税抜合計", "消費税", "税込合計", "納入", "場所", "条件", "期日", "着", "御中", "様", "印"];
         clearLabels.forEach(lbl => { sheet.createTextFinder(lbl).replaceAllWith(""); });
       }
@@ -189,13 +239,12 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         setNumeric(sheet, "％消費税％", "消費税", totals.tax);
         setNumeric(sheet, "％税込合計％", "税込合計", totals.totalWithTax);
       } else {
-        // 2枚目以降は合計欄もクリア
         sheet.createTextFinder("％税抜合計％").replaceAllWith("");
         sheet.createTextFinder("％消費税％").replaceAllWith("");
         sheet.createTextFinder("％税込合計％").replaceAllWith("");
       }
 
-      // 小計欄の処理：途中ページの「次頁に続く」は廃止し、空白にする
+      // 小計欄の処理
       const subFinder = sheet.createTextFinder("小計").findNext();
       if (subFinder) {
          const row = subFinder.getRow();
@@ -216,18 +265,16 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
 
          if (targetCell) {
              if (isLast) {
-                 // 最終ページのみ小計を表示
                  targetCell.setValue(totals.subtotal).setNumberFormat("#,##0");
              } else {
-                 // 途中ページは「次頁に続く」も表示せず、空白にする
                  targetCell.clearContent();
-                 // 【修正】「小計」というラベル自体も消す
                  subFinder.setValue("");
-                 sheet.createTextFinder("％税込合計％").replaceAllWith(""); 
+                 sheet.createTextFinder("％税込合計％").replaceAllWith("");
              }
          }
       }
 
+      // 品目プレースホルダーを取得して設定
       const names = sheet.createTextFinder("％商品名％").findAll();
       names.sort((a, b) => a.getRow() - b.getRow());
 
@@ -246,6 +293,17 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
           });
         }
       });
+
+      // 1枚目: 品目数が少ない場合は余分な空行を後ろから削除
+      if (isFirst && pageItems.length < names.length) {
+        const extraRowNums = names
+          .slice(pageItems.length)
+          .map(r => r.getRow())
+          .sort((a, b) => b - a); // 後ろから削除（行番号ずれ防止）
+        extraRowNums.forEach(rowNum => {
+          try { sheet.deleteRows(rowNum, 1); } catch(e) { console.warn("Row delete failed", e); }
+        });
+      }
     });
 
     newSS.deleteSheet(templateSheet);
@@ -254,19 +312,20 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
     const pdfBlob = newSSFile.getAs('application/pdf');
     const pdfFile = folder.createFile(pdfBlob);
     pdfFile.setName(fileName + ".pdf");
-    
+
+    // 受注データにPDF URLを書き込み
     const mainSS = SpreadsheetApp.openById(CONFIG.SS_ID);
     const mainSheet = mainSS.getSheetByName(CONFIG.SHEET_MAIN);
     const data = mainSheet.getDataRange().getValues();
     const headers = data[0];
     const orderIndex = headers.indexOf("受注No");
-    
+
     let pdfIdx = headers.indexOf(CONFIG.PDF_COL_NAME);
     if (pdfIdx === -1) {
       pdfIdx = headers.length;
       mainSheet.getRange(1, pdfIdx + 1).setValue(CONFIG.PDF_COL_NAME);
     }
-    
+
     const safeOrderNoRaw = String(orderData["受注No"]).trim();
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][orderIndex]).trim() === safeOrderNoRaw) {
