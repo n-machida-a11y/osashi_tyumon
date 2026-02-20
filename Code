@@ -120,9 +120,9 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
       const sheet = templateSheet.copyTo(newSS);
       sheet.setName(`P${index + 1}`);
 
-      const printDate = issueDateStr ? 
-          issueDateStr.replace(/\//g, '年').replace(/(\d{2})$/, '月$1日').replace('年月', '月') :
-          (issueDateStr || Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日"));
+      const printDate = issueDateStr
+          ? issueDateStr.replace(/(\d{4})\/(\d{2})\/(\d{2})/, '$1年$2月$3日')
+          : Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日");
 
       // 担当者名の処理: 社名との結合をやめ、分離して出力
       let contactName = "";
@@ -151,7 +151,10 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         "%納期%": isFirst ? (orderData["納入期日"] || "") : "",
         "%締日%": isFirst ? (orderData["締日"] || "") : "",
         "%支払日%": isFirst ? (orderData["支払日"] || "") : "",
-        "%支払方法%": isFirst ? (orderData["支払方法"] || "") : ""
+        "%支払方法%": isFirst ? (orderData["支払方法"] || "") : "",
+        "次頁に続く": "",
+        "次のページへ": "",
+        "次ページへ": ""
       };
 
       Object.keys(replacements).forEach(k => {

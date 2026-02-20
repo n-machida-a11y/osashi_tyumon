@@ -175,11 +175,16 @@
         setItems(filteredItems);
         setSelectedIds(new Set(filteredItems.map(it => it.tempId)));
         
+        const zip = info["郵便番号"] ? `〒${info["郵便番号"]}` : "";
+        const addressFull = [zip, info["住所１"] || "", info["住所２"] || ""]
+          .filter(v => v)
+          .join("\n");
+
         setEditableInfo({
-          "得意先名１": info["得意先名１"] || "", 
-          "得意先住所１": info["得意先住所１"] || "",
-          "担当者名": "", 
-          "直送先名１": info["直送先名"] || "", 
+          "得意先名１": info["直送先名"] || "",
+          "得意先住所１": addressFull,
+          "担当者名": info["先方担当者名"] || "",
+          "直送先名１": info["直送先名"] || "",
           "納入期日": formatDateJP(info["納期"]), // 納期を整形して反映
           "締日": info["請求締日"] || "",
           "支払日": "当月末",
@@ -318,10 +323,10 @@
                           
                           <div className="flex items-start justify-end w-full mb-1">
                             <span className="text-slate-400 text-[10px] mr-2 mt-1 whitespace-nowrap">住所</span>
-                            <textarea 
-                              className="inline-textarea w-[320px] text-right font-bold" 
-                              rows={1}
-                              value={editableInfo["得意先住所１"]} 
+                            <textarea
+                              className="inline-textarea w-[320px] text-right font-bold"
+                              rows={2}
+                              value={editableInfo["得意先住所１"]}
                               onChange={e => {
                                 setEditableInfo({...editableInfo, "得意先住所１": e.target.value});
                                 adjustHeight(e.target);
@@ -370,7 +375,7 @@
                         <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">税抜合計</span><span className="text-xs font-bold">¥{totals.subtotal.toLocaleString()}</span></div>
                         <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">消費税</span><span className="text-xs font-bold">¥{totals.tax.toLocaleString()}</span></div>
                         <div className="flex-[2] bg-slate-50 flex flex-col justify-center px-3">
-                          <div className="flex justify-between items-baseline">
+                          <div className="flex justify-between items-center">
                             <span className="text-[10px] text-blue-700 font-bold">税込合計</span>
                             {/* 修正：italicを削除 */}
                             <span className="text-xl font-black text-blue-800">¥{totals.totalWithTax.toLocaleString()}</span>
@@ -400,12 +405,12 @@
                       {pageItems.map((item) => {
                         const s = selectedIds.has(item.tempId);
                         return (
-                          <tr key={item.tempId} className={`h-9 ${s ? '' : 'bg-slate-50 opacity-30 no-print'}`}>
-                            <td className="border border-slate-900 text-center no-print"><input type="checkbox" checked={s} onChange={() => toggleItem(item.tempId)} /></td>
-                            <td className="border border-slate-900 p-2 text-xs">{item["商品名"]}</td>
-                            <td className="border border-slate-900 text-center text-xs">{item["数量"]}</td>
-                            <td className="border border-slate-900 text-right p-2 text-xs">¥{Number(item["単価"]).toLocaleString()}</td>
-                            <td className="border border-slate-900 text-right p-2 text-xs font-bold">¥{(Number(item["数量"]) * Number(item["単価"])).toLocaleString()}</td>
+                          <tr key={item.tempId} className={`${s ? '' : 'bg-slate-50 opacity-30 no-print'}`} style={{ minHeight: '2.25rem' }}>
+                            <td className="border border-slate-900 text-center align-middle no-print"><input type="checkbox" checked={s} onChange={() => toggleItem(item.tempId)} /></td>
+                            <td className="border border-slate-900 p-2 text-xs break-all align-middle">{item["商品名"]}</td>
+                            <td className="border border-slate-900 text-center text-xs align-middle">{item["数量"]}</td>
+                            <td className="border border-slate-900 text-right p-2 text-xs align-middle">¥{Number(item["単価"]).toLocaleString()}</td>
+                            <td className="border border-slate-900 text-right p-2 text-xs font-bold align-middle">¥{(Number(item["数量"]) * Number(item["単価"])).toLocaleString()}</td>
                           </tr>
                         );
                       })}
