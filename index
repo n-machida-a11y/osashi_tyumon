@@ -428,12 +428,11 @@
                       {isLast ? (
                         <tr className="h-10 bg-slate-50 font-bold border-t-2 border-slate-900">
                           <td colSpan="4" className="border border-slate-900 text-center text-xs bg-slate-100">税込合計金額</td>
-                          {/* 修正：italicを削除 */}
                           <td className="border border-slate-900 text-right p-2 text-lg text-blue-800">¥{totals.totalWithTax.toLocaleString()}</td>
                         </tr>
-                      ) : (
+                      ) : !isFirst ? (
                         <tr className="h-8"><td colSpan="5" className="border-t border-slate-900"></td></tr>
-                      )}
+                      ) : null}
                     </tfoot>
                   </table>
                 </div>

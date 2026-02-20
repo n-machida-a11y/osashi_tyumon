@@ -294,15 +294,32 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         }
       });
 
-      // 1枚目: 品目数が少ない場合は余分な空行を後ろから削除
-      if (isFirst && pageItems.length < names.length) {
-        const extraRowNums = names
-          .slice(pageItems.length)
-          .map(r => r.getRow())
-          .sort((a, b) => b - a); // 後ろから削除（行番号ずれ防止）
-        extraRowNums.forEach(rowNum => {
-          try { sheet.deleteRows(rowNum, 1); } catch(e) { console.warn("Row delete failed", e); }
-        });
+      // 1枚目: 余分な空行を確実に削除
+      if (isFirst && names.length > 0) {
+        const usedCount = Math.min(pageItems.length, names.length);
+
+        // STEP 1: %商品名%を持つ余分な行を後ろから削除
+        if (pageItems.length < names.length) {
+          const extraRowNums = names
+            .slice(pageItems.length)
+            .map(r => r.getRow())
+            .sort((a, b) => b - a);
+          extraRowNums.forEach(rowNum => {
+            try { sheet.deleteRows(rowNum, 1); } catch(e) { console.warn("Row delete failed", e); }
+          });
+        }
+
+        // STEP 2: %商品名%を持たない末尾の空行も削除（行削除後に再検索）
+        if (usedCount > 0) {
+          const lastUsedRowNum = names[usedCount - 1].getRow();
+          const newSubFinder = sheet.createTextFinder("小計").findNext();
+          if (newSubFinder) {
+            const gapRows = newSubFinder.getRow() - lastUsedRowNum - 1;
+            if (gapRows > 0) {
+              try { sheet.deleteRows(lastUsedRowNum + 1, gapRows); } catch(e) { console.warn("Gap row delete failed", e); }
+            }
+          }
+        }
       }
     });
 
