@@ -72,7 +72,31 @@
 <body>
   <!-- GASから値を渡すための隠しフィールド -->
   <input type="hidden" id="initial-order-no" value="<?= orderNo ?>">
-  
+
+  <!-- 支払日の選択肢 -->
+  <datalist id="payment-dates">
+    <option value="当月末"/>
+    <option value="翌月10日"/>
+    <option value="翌月20日"/>
+    <option value="翌月末"/>
+    <option value="翌々月10日"/>
+  </datalist>
+
+  <!-- 支払条件詳細の選択肢 -->
+  <datalist id="payment-details">
+    <option value="現金"/>
+    <option value="手形　サイト90日"/>
+    <option value="手形　サイト120日"/>
+    <option value="手形　サイト115日"/>
+    <option value="10万以上手形　サイト70日"/>
+    <option value="10万以上手形　サイト90日"/>
+    <option value="10万以上手形　サイト97日"/>
+    <option value="10万以上手形　サイト120日"/>
+    <option value="50万以上半金半手サイト115日"/>
+    <option value="10万以上手形"/>
+    <option value="手形"/>
+  </datalist>
+
   <div id="root"></div>
 
   <script type="text/babel">
@@ -104,11 +128,21 @@
         "直送先名１": "",
         "納入期日": "",
         "締日": "",
-        "支払日": "当月末",
-        "支払方法": ""
+        "支払日": "",
+        "支払条件種別": "従来通り",
+        "支払条件詳細": ""
       });
 
-      const paymentDateOptions = ["当月末", "翌月10日", "翌月20日", "翌月末", "翌々月10日"];
+      // 得意先マスタ「回収日」コードを支払日テキストに変換（例: "110" → "1ヶ月後の10日"）
+      const convertCollectionDate = (code) => {
+        if (!code || String(code).length < 3) return "";
+        const sCode = String(code);
+        const month = parseInt(sCode.substring(0, 1));
+        const day = sCode.substring(1);
+        const dayDisplay = (day === "99" || day === "31") ? "末日" : parseInt(day) + "日";
+        return month + "ヶ月後の" + dayDisplay;
+      };
+
       const ITEMS_P1 = 15;
       const ITEMS_PN = 25;
 
@@ -135,7 +169,8 @@
             // スプレッドシートのシリアル値（1900/1/1起点の日数）→ UTC基準のDate
             d = new Date((dateVal - 25569) * 86400000);
           } else {
-            d = new Date(dateVal);
+            // スラッシュ区切り("2026/02/25")をハイフンに変換してISO形式で確実にパース
+            d = new Date(String(dateVal).replace(/\//g, '-'));
           }
           if (isNaN(d.getTime())) return s;
           // UTC基準で年月日を取得（タイムゾーンのズレを防ぐ）
@@ -207,8 +242,9 @@
           "直送先名１": info["直送先名"] || "",
           "納入期日": formatDateJP(info["納期"]),
           "締日": info["請求締日"] || "",
-          "支払日": "当月末",
-          "支払方法": (info["回収種別１"] || "") + (info["回収種別２"] || "")
+          "支払日": convertCollectionDate(info["M_回収日"]) || "",
+          "支払条件種別": "従来通り",
+          "支払条件詳細": (info["回収種別１"] || "") + (info["回収種別２"] || "")
         });
       };
 
@@ -388,8 +424,8 @@
                         <div className="flex h-9"><div className="w-28 cell-label">■ 納入期日 ■</div><div className="flex-1 cell-val text-center"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["納入期日"]} onChange={e => setEditableInfo({...editableInfo, "納入期日": e.target.value})} /></div><div className="w-12 cell-label border-l border-slate-900">着</div></div>
                         <div className="flex h-9"><div className="w-28 cell-label">■ 納入場所 ■</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["直送先名１"]} onChange={e => setEditableInfo({...editableInfo, "直送先名１": e.target.value})} /></div></div>
                         <div className="flex h-9"><div className="w-28 cell-label">■ 支払条件 ■ 締日</div><div className="flex-1 cell-val text-center font-bold"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["締日"]} onChange={e => setEditableInfo({...editableInfo, "締日": e.target.value})} /></div></div>
-                        <div className="flex h-9"><div className="w-28 cell-label">支払日</div><div className="flex-1 cell-val"><select className="bg-transparent w-full outline-none" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})}>{paymentDateOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div></div>
-                        <div className="flex h-9"><div className="w-28 cell-label">支払方法</div><div className="flex-1 cell-val font-bold"><input className="bg-transparent w-full outline-none" value={editableInfo["支払方法"]} onChange={e => setEditableInfo({...editableInfo, "支払方法": e.target.value})} /></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">支払日</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})} list="payment-dates" placeholder="例: 1ヶ月後の末日" /></div></div>
+                        <div className="flex min-h-[2.25rem]"><div className="w-28 cell-label">支払条件</div><div className="flex-1 cell-val flex flex-col gap-1 py-1"><div className="flex items-center gap-1"><select className="bg-transparent outline-none text-xs font-bold" value={editableInfo["支払条件種別"]} onChange={e => setEditableInfo({...editableInfo, "支払条件種別": e.target.value})}><option value="従来通り">従来通り</option><option value="従来通り以外">従来通り以外</option></select></div><input className="bg-transparent w-full outline-none text-xs" value={editableInfo["支払条件詳細"]} onChange={e => setEditableInfo({...editableInfo, "支払条件詳細": e.target.value})} list="payment-details" placeholder="詳細を入力（例: 手形 サイト90日）" /></div></div>
                       </div>
                       <div className="col-span-4 flex flex-col divide-y divide-slate-900">
                         <div className="flex-1 flex items-center justify-between px-3"><span className="text-[10px] text-slate-400">税抜合計</span><span className="text-xs font-bold">¥{totals.subtotal.toLocaleString()}</span></div>
@@ -462,3 +498,4 @@
   </script>
 </body>
 </html>
+

@@ -51,9 +51,9 @@ function getData(orderNo) {
     const orderInfo = {};
     mainHeaders.forEach((h, i) => {
       const v = mainRow[i];
-      // DateオブジェクトはJSTの文字列に変換（フロントで1970年になるのを防ぐ）
+      // DateオブジェクトはYYYYMMDD形式の文字列に変換（フロントの8桁チェックで確実にパースするため）
       orderInfo[h] = (v instanceof Date)
-        ? Utilities.formatDate(v, "JST", "yyyy/MM/dd")
+        ? Utilities.formatDate(v, "JST", "yyyyMMdd")
         : v;
     });
 
@@ -78,6 +78,7 @@ function getData(orderNo) {
           orderInfo["M_得意先名２"] = masterInfo["得意先名２"] || "";
           orderInfo["M_先方担当者名"] = masterInfo["先方担当者名"] || "";
           orderInfo["M_担当敬称"] = masterInfo["担当敬称"] || "";
+          orderInfo["M_回収日"] = masterInfo["回収日"] || "";
         }
       }
     }
@@ -209,7 +210,7 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         "%納期%": isFirst ? (orderData["納入期日"] || "") : "",
         "%締日%": isFirst ? (orderData["締日"] || "") : "",
         "%支払日%": isFirst ? (orderData["支払日"] || "") : "",
-        "%支払方法%": isFirst ? (orderData["支払方法"] || "") : "",
+        "%支払方法%": isFirst ? (orderData["支払条件詳細"] || "") : "",
         "次頁に続く": "",
         "次のページへ": "",
         "次ページへ": ""
@@ -403,3 +404,4 @@ function setNumeric(sheet, p, l, v) {
     sheet.getRange(r, c + 2).setValue(v).setNumberFormat("#,##0");
   }
 }
+
