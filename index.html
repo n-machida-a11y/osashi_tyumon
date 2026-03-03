@@ -152,6 +152,7 @@
         "得意先名１": "",
         "得意先住所１": "",
         "担当者名": "",
+        "見積書No": "",
         "直送先名１": "",
         "直送先名２": "",
         "納入期日": "",
@@ -317,6 +318,7 @@
           "得意先名１": companyName,
           "得意先住所１": addressFull,
           "担当者名": "",
+          "見積書No": info["見積書No"] || "",
           "直送先名１": info["直送先名"] || "",
           "直送先名２": info["直送先名２"] || "",
           "納入期日": formatDateJP(info["納期"]),
@@ -437,7 +439,7 @@
               
               return (
                 <div key={pageIdx} className="paper">
-                  <div className="absolute top-6 right-12 text-[10px] font-bold text-slate-400">{pageIdx + 1} / {pagedItems.length} ページ</div>
+                  <div className="absolute top-6 right-12 text-[10px] font-bold text-slate-400 no-print">{pageIdx + 1} / {pagedItems.length} ページ</div>
 
                   <div className="text-center mb-4 pt-2">
                     <h1 className="text-4xl font-bold tracking-[1.5em] border-b-4 border-double border-slate-900 pb-1 inline-block">注 文 書</h1>
@@ -499,11 +501,12 @@
                   {isFirst && (
                     <div className="grid grid-cols-12 border border-slate-900 mb-6">
                       <div className="col-span-8 flex flex-col divide-y divide-slate-900 border-r border-slate-900">
-                        <div className="flex h-9"><div className="w-28 cell-label">■ 納入期日 ■</div><div className="flex-1 cell-val text-center"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["納入期日"]} onChange={e => setEditableInfo({...editableInfo, "納入期日": e.target.value})} /></div><div className="w-12 cell-label border-l border-slate-900">着</div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">■ 見積書 No ■</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["見積書No"]} onChange={e => setEditableInfo({...editableInfo, "見積書No": e.target.value})} /></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">■ 納入期日 ■</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["納入期日"]} onChange={e => setEditableInfo({...editableInfo, "納入期日": e.target.value})} /></div><div className="w-12 cell-label border-l border-slate-900">着</div></div>
                         <div className="flex h-9"><div className="w-28 cell-label">■ 納入場所 ■</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["直送先名１"]} onChange={e => setEditableInfo({...editableInfo, "直送先名１": e.target.value})} /></div></div>
                         <div className="flex h-9"><div className="w-28 cell-label">直送先２</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["直送先名２"]} onChange={e => setEditableInfo({...editableInfo, "直送先名２": e.target.value})} /></div></div>
-                        <div className="flex h-9"><div className="w-28 cell-label">■ 支払条件 ■ 締日</div><div className="flex-1 cell-val text-center font-bold"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["締日"]} onChange={e => setEditableInfo({...editableInfo, "締日": e.target.value})} /></div></div>
-                        <div className="flex h-9"><div className="w-28 cell-label">支払日</div><div className="flex-1 cell-val text-center"><input className="bg-transparent w-full text-center outline-none" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})} list="payment-dates" placeholder="例: 1ヶ月後の末日" /></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">■ 支払条件 ■ 締日</div><div className="flex-1 cell-val font-bold"><input className="bg-transparent w-full outline-none" value={editableInfo["締日"]} onChange={e => setEditableInfo({...editableInfo, "締日": e.target.value})} /></div></div>
+                        <div className="flex h-9"><div className="w-28 cell-label">支払日</div><div className="flex-1 cell-val"><input className="bg-transparent w-full outline-none" value={editableInfo["支払日"]} onChange={e => setEditableInfo({...editableInfo, "支払日": e.target.value})} list="payment-dates" placeholder="例: 1ヶ月後の末日" /></div></div>
                         <div className="flex min-h-[2.25rem]"><div className="w-28 cell-label">支払条件</div><div className="flex-1 cell-val flex flex-col gap-1 py-1"><div className="flex items-center gap-1"><select className="bg-transparent outline-none text-xs font-bold" value={editableInfo["支払条件種別"]} onChange={e => setEditableInfo({...editableInfo, "支払条件種別": e.target.value})}><option value="従来通り">従来通り</option><option value="従来通り以外">従来通り以外</option></select></div><input className="bg-transparent w-full outline-none text-xs" value={editableInfo["支払条件詳細"]} onChange={e => setEditableInfo({...editableInfo, "支払条件詳細": e.target.value})} list="payment-details" placeholder="詳細を入力（例: 手形 サイト90日）" /></div></div>
                       </div>
                       <div className="col-span-4 flex flex-col divide-y divide-slate-900">

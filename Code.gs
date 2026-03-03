@@ -199,7 +199,7 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
       // テキスト置換を一括処理（createTextFinderのAPI呼び出し回数を削減）
       const textReplacements = {
         "％受注日％": isFirst ? printDate : "",
-        "％見積番号％": isFirst ? (orderData["受注No"] || "") : "",
+        "％見積番号％": isFirst ? (orderData["見積書No"] || "") : "",
         "％得意先住所１％": isFirst ? (orderData["得意先住所１"] || "") : "",
         "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "",
         "％担当者名％": contactName,
@@ -217,8 +217,6 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
       };
 
       bulkTextReplace(sheet, textReplacements);
-
-      sheet.getRange(1, 6).setValue(`${index + 1} / ${totalPages} ページ`);
 
       if (!isFirst) {
         let hdrFinder = sheet.createTextFinder("品名").findNext();
@@ -301,39 +299,28 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         }
       });
 
-      // 1枚目: 余分な空行を確実に削除
-      if (isFirst && names.length > 0) {
-        const usedCount = Math.min(pageItems.length, names.length);
-
-        // STEP 1: %商品名%を持つ余分な行を後ろから削除
-        if (pageItems.length < names.length) {
-          const extraRowNums = names
-            .slice(pageItems.length)
-            .map(r => r.getRow())
-            .sort((a, b) => b - a);
-          extraRowNums.forEach(rowNum => {
-            try { sheet.deleteRows(rowNum, 1); } catch(e) { console.warn("Row delete failed", e); }
-          });
-        }
-
-        // STEP 2: %商品名%を持たない末尾の空行も削除（行削除後に再検索）
-        if (usedCount > 0) {
-          const lastUsedRowNum = names[usedCount - 1].getRow();
-          const newSubFinder = sheet.createTextFinder("小計").findNext();
-          if (newSubFinder) {
-            const gapRows = newSubFinder.getRow() - lastUsedRowNum - 1;
-            if (gapRows > 0) {
-              try { sheet.deleteRows(lastUsedRowNum + 1, gapRows); } catch(e) { console.warn("Gap row delete failed", e); }
-            }
-          }
-        }
-      }
+      // 品名欄は空行を残す（得意先向け注文書として空行スペースを確保）
     });
 
     newSS.deleteSheet(templateSheet);
 
     SpreadsheetApp.flush();
-    const pdfBlob = newSSFile.getAs('application/pdf');
+    Utilities.sleep(3000); // テンプレート削除・flush の反映待ち
+
+    // A4縦・幅フィットで PDF エクスポート
+    const exportUrl =
+      `https://docs.google.com/spreadsheets/d/${newSSFile.getId()}/export?` +
+      `format=pdf&size=7&portrait=true&fitw=true&fith=false&` +
+      `gridlines=false&printtitle=false&sheetnames=false&pagenumbers=false&` +
+      `top_margin=0.50&bottom_margin=0.50&left_margin=0.50&right_margin=0.50`;
+    const exportRes = UrlFetchApp.fetch(exportUrl, {
+      headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
+      muteHttpExceptions: true
+    });
+    if (exportRes.getResponseCode() !== 200) {
+      throw new Error(`PDF export failed (HTTP ${exportRes.getResponseCode()})`);
+    }
+    const pdfBlob = exportRes.getBlob().setContentType('application/pdf');
     const pdfFile = folder.createFile(pdfBlob);
     pdfFile.setName(fileName + ".pdf");
 
