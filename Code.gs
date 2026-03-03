@@ -194,11 +194,11 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
           ? issueDateStr.replace(/(\d{4})\/(\d{2})\/(\d{2})/, '$1年$2月$3日')
           : Utilities.formatDate(new Date(), "JST", "yyyy年MM月dd日");
 
-      // 担当者名と担当敬称を結合
+      // 担当者名（様が未付加の場合のみ追加）
       let contactName = "";
       if (isFirst && orderData["担当者名"]) {
-        const suffix = orderData["担当敬称"] || "様";
-        contactName = orderData["担当者名"] + " " + suffix;
+        const n = String(orderData["担当者名"]).trim();
+        contactName = n.endsWith("様") ? n : n + " 様";
       }
 
       // テキスト置換を一括処理（createTextFinderのAPI呼び出し回数を削減）
@@ -305,6 +305,17 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
       });
 
       // 品名欄は空行を残す（得意先向け注文書として空行スペースを確保）
+
+      // 1枚目のみ：最終行が完全空白の場合は削除
+      if (isFirst) {
+        const lastRow = sheet.getLastRow();
+        if (lastRow > 0) {
+          const lastRowVals = sheet.getRange(lastRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+          if (lastRowVals.every(v => v === "" || v === null)) {
+            try { sheet.deleteRows(lastRow, 1); } catch(e) { console.warn("Last blank row delete failed", e); }
+          }
+        }
+      }
     });
 
     newSS.deleteSheet(templateSheet);
