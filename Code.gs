@@ -204,7 +204,7 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
       // テキスト置換を一括処理（createTextFinderのAPI呼び出し回数を削減）
       const textReplacements = {
         "％受注日％": isFirst ? printDate : "",
-        "％見積番号％": isFirst ? (orderData["見積書No"] || "") : "",
+        "％見積書No％": isFirst ? (orderData["見積書No"] || "") : "",
         "％得意先住所１％": isFirst ? (orderData["得意先住所１"] || "") : "",
         "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "",
         "％担当者名％": contactName,
