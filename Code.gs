@@ -310,22 +310,7 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
     newSS.deleteSheet(templateSheet);
 
     SpreadsheetApp.flush();
-    Utilities.sleep(3000); // テンプレート削除・flush の反映待ち
-
-    // A4縦・幅フィットで PDF エクスポート
-    const exportUrl =
-      `https://docs.google.com/spreadsheets/d/${newSSFile.getId()}/export?` +
-      `format=pdf&size=7&portrait=true&fitw=true&fith=false&` +
-      `gridlines=false&printtitle=false&sheetnames=false&pagenumbers=false&` +
-      `top_margin=0.50&bottom_margin=0.50&left_margin=0.50&right_margin=0.50`;
-    const exportRes = UrlFetchApp.fetch(exportUrl, {
-      headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
-      muteHttpExceptions: true
-    });
-    if (exportRes.getResponseCode() !== 200) {
-      throw new Error(`PDF export failed (HTTP ${exportRes.getResponseCode()})`);
-    }
-    const pdfBlob = exportRes.getBlob().setContentType('application/pdf');
+    const pdfBlob = newSSFile.getAs('application/pdf');
     const pdfFile = folder.createFile(pdfBlob);
     pdfFile.setName(fileName + ".pdf");
 
