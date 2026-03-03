@@ -324,6 +324,9 @@
           ? contactRaw + " 様"
           : contactRaw;
 
+        const rawPayment = info["支払条件詳細"] || "";
+        const paymentDetail = rawPayment === "現金" ? "現金振込" : rawPayment;
+
         setEditableInfo({
           "得意先名１": companyName,
           "得意先住所１": addressFull,
@@ -335,7 +338,7 @@
           "締日": info["請求締日"] || "",
           "支払日": convertCollectionDate(info["M_回収日"]) || "",
           "支払条件種別": info["支払条件種別"] || "従来通り",
-          "支払条件詳細": info["支払条件詳細"] || ""
+          "支払条件詳細": paymentDetail
         });
       };
 

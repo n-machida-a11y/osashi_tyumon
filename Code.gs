@@ -209,9 +209,9 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
         "％得意先名１％": isFirst ? (orderData["得意先名１"] || "") : "",
         "％担当者名％": contactName,
         "％直送先名１％": isFirst ? (orderData["直送先名１"] || "") : "",
-        "%得意先住所2%": isFirst ? (orderData["得意先住所１"] || "") : "",
-        "%得意先名2%": isFirst ? (orderData["得意先名１"] || "") : "",
-        "%直送先名2%": isFirst ? (orderData["直送先名２"] || "") : "",
+        "％得意先住所２％": isFirst ? (orderData["得意先住所１"] || "") : "",
+        "％得意先名２％": isFirst ? (orderData["得意先名１"] || "") : "",
+        "％直送先名２％": isFirst ? (orderData["直送先名２"] || "") : "",
         "%納期%": isFirst ? (orderData["納入期日"] || "") : "",
         "%締日%": isFirst ? (orderData["締日"] || "") : "",
         "%支払日%": isFirst ? (orderData["支払日"] || "") : "",
@@ -277,9 +277,11 @@ function generatePDF(orderData, selectedItems, totals, issueDateStr) {
              if (isLast) {
                  targetCell.setValue(totals.subtotal).setNumberFormat("#,##0");
              } else {
-                 targetCell.clearContent();
-                 subFinder.setValue("");
-                 sheet.createTextFinder("％税込合計％").replaceAllWith("");
+                 // 最終ページ以外は小計行ごと削除（空白行防止）
+                 try { sheet.deleteRows(subFinder.getRow(), 1); } catch(e) {
+                     targetCell.clearContent();
+                     subFinder.setValue("");
+                 }
              }
          }
       }
