@@ -319,18 +319,13 @@
         const name2 = info["M_得意先名２"] || "";
         const companyName = [name1, name2].filter(v => v).join(" ");
 
-        const contactRaw = String(info["直送先担当者名"] || "").trim();
-        const contactName = contactRaw && !contactRaw.endsWith("様")
-          ? contactRaw + " 様"
-          : contactRaw;
-
         const rawPayment = info["支払条件詳細"] || "";
         const paymentDetail = rawPayment === "現金" ? "現金振込" : rawPayment;
 
         setEditableInfo({
           "得意先名１": companyName,
           "得意先住所１": addressFull,
-          "担当者名": contactName,
+          "担当者名": "",
           "見積書No": info["見積書No"] || "",
           "直送先名１": info["直送先名"] || "",
           "直送先名２": info["直送先名２"] || "",
