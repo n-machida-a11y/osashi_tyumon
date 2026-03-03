@@ -216,13 +216,18 @@
       const fetchData = useCallback(() => {
         if (typeof google !== 'undefined' && google.script && google.script.run) {
           google.script.run
-            .withSuccessHandler(res => { 
+            .withSuccessHandler(res => {
+              if (res == null) {
+                setError({ message: "サーバーからの応答が空です。GASのスクリプトエラーログを確認してください。" });
+                setLoading(false);
+                return;
+              }
               if (res.success) {
-                initData(res); 
+                initData(res);
               } else {
                 setError({ message: res.message || "データの取得に失敗しました" });
               }
-              setLoading(false); 
+              setLoading(false);
             })
             .withFailureHandler(err => { 
               console.error(err);

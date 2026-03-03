@@ -96,11 +96,16 @@ function getData(orderNo) {
       })
       .map(row => {
         const item = {};
-        detailHeaders.forEach((h, i) => { item[h] = row[i]; });
+        detailHeaders.forEach((h, i) => {
+          const v = row[i];
+          item[h] = (v instanceof Date)
+            ? Utilities.formatDate(v, "JST", "yyyyMMdd")
+            : v;
+        });
         return item;
       });
 
-    return { success: true, orderInfo, items };
+    return { success: true, orderInfo: orderInfo, items: items };
   } catch (e) {
     console.error(e);
     return { success: false, message: e.toString() };
